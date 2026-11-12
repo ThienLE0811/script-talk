@@ -5,11 +5,17 @@ Hướng dẫn cho Claude khi làm việc trong repo **ScriptTalk**: ứng dụn
 ## Lệnh
 
 ```bash
-npm install      # cài dependency
-npm run dev      # chạy dev server tại http://localhost:3000
+npm install        # cài dependency
+npm run dev        # chạy dev server tại http://localhost:3000
+npm run build      # build production (cũng kiểm tra type)
+npm run start      # chạy bản build production
+npm run lint       # ESLint
+npx tsc --noEmit   # chỉ kiểm tra type, nhanh hơn build
 ```
 
-<!-- TODO: bổ sung nếu có: npm run build / lint / test / typecheck -->
+Chưa có unit test. `next build` và `next dev` dùng chung thư mục `.next`, nên cần dừng dev server trước khi build.
+
+Thêm component shadcn/ui bằng `npx shadcn@latest add <tên>` (cấu hình trong `components.json`, style `radix-nova`). Các component trong `src/components/ui/` import `cn` từ package `cn` của shadcn, đây là bình thường.
 
 Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Firefox/Safari không hỗ trợ đầy đủ Speech Recognition, nên không dùng để xác nhận tính năng nói.
 
@@ -22,12 +28,26 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - **Lưu trữ:** kịch bản và cài đặt nằm trong `localStorage`. Không có database và tài khoản.
 - Không tự thêm backend, API key, dịch vụ STT/TTS bên ngoài hay thư viện nặng nếu chưa được yêu cầu.
 
-<!-- TODO: điền cấu trúc thư mục thực tế, ví dụ:
-- `src/lib/parser.ts`: phân tích kịch bản
-- `src/lib/scoring.ts`: chấm điểm từng từ
-- `src/hooks/useSpeech*.ts`: bọc TTS và Speech Recognition
-- `src/components/`: UI soạn kịch bản và luyện tập
--->
+### Cấu trúc thư mục
+
+- `src/lib/script.ts`: logic thuần, không phụ thuộc DOM. Gồm parser (`parseScript`), chấm điểm (`compareLine`, `normalizeSentence`), `cleanForSpeech` (bỏ ghi chú trước khi đọc), `hintText` (chế độ gợi ý) và `SAMPLE_SCRIPT`.
+- `src/lib/speech.ts`: bọc Web Speech API. `useEnglishVoices` (danh sách giọng tiếng Anh, giọng tốt xếp trước), `speak` / `stopSpeaking`, `startListening` (tự dừng sau ~1,6 giây im lặng hoặc tối đa 25 giây), `isRecognitionSupported`.
+- `src/lib/settings.ts`: kiểu `Settings`, `SavedScript`, giá trị mặc định và các hàm đọc/ghi `localStorage` có `try/catch`.
+- `src/app/page.tsx`: trang duy nhất. Giữ state, chuyển giữa chế độ soạn (`edit`) và luyện (`practice`), lưu dữ liệu.
+- `src/app/layout.tsx`: font Montserrat (có subset `vietnamese`), `ThemeProvider` (next-themes), `TooltipProvider`, `Toaster`.
+- `src/app/globals.css`: Tailwind v4 và theme token của shadcn (màu chủ đạo indigo, thêm token `success`), sáng/tối theo class `.dark`.
+- `src/components/Editor.tsx`: ô soạn kịch bản, danh sách kịch bản đã lưu và bảng cài đặt (vai, giọng, tốc độ, chế độ hiển thị, điểm đạt).
+- `src/components/Practice.tsx`: màn hình hội thoại. Là máy trạng thái `speaking → listening → result/waiting → …`, dùng `tokenRef` để huỷ callback cũ khi người dùng bỏ qua, tạm dừng hoặc nghe lại. Phím tắt cũng nằm ở đây.
+- `src/components/ThemeToggle.tsx`: nút chuyển sáng/tối.
+- `src/components/ui/`: component sinh ra từ shadcn. Hạn chế sửa tay.
+
+### Khoá localStorage
+
+| Khoá                  | Nội dung                                              |
+| --------------------- | ----------------------------------------------------- |
+| `scripttalk.draft`    | `{ raw, currentId }`: kịch bản đang soạn              |
+| `scripttalk.settings` | `Settings`: được merge với `DEFAULT_SETTINGS` khi đọc |
+| `scripttalk.saved`    | `SavedScript[]`: các kịch bản đã lưu                  |
 
 ## Định dạng kịch bản (hợp đồng với người dùng, giữ ổn định)
 
