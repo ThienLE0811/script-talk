@@ -81,6 +81,11 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Sonner injects its own unlayered system font stack; `html` raises specificity above it. */
+html [data-sonner-toaster] {
+  font-family: var(--font-app-sans), system-ui, sans-serif;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -22,8 +22,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi" suppressHydrationWarning>
-      <body className={`${sans.variable} antialiased`}>
+    // The font variable must live on <html>: the root font-family rule reads it there,
+    // and if it is only defined on <body> the root falls back to the browser default (Times).
+    <html lang="vi" className={sans.variable} suppressHydrationWarning>
+      <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
           <Toaster position="top-center" />
