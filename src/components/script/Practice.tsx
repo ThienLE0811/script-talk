@@ -3,8 +3,11 @@
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  CheckIcon,
   EyeIcon,
+  Loader2Icon,
   MicIcon,
+  NotebookPenIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -15,12 +18,15 @@ import {
   Volume2Icon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { aiErrorText, AiRequestError } from "@/lib/ai-errors";
+import { addPhrases } from "@/lib/phrases-client";
 import { failedLineIndexes } from "@/lib/practice";
 import { cleanForSpeech, compareLine, hintText, type Comparison, type ParsedScript } from "@/lib/script";
 import type { LineMode, Settings } from "@/lib/settings";
@@ -221,6 +227,25 @@ export default function Practice({
   const avg = scored.length ? Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) : 0;
   const myTotal = lines.filter((_, i) => isMine(i)).length;
   const failed = phase === "done" ? failedLineIndexes(script, myRoles, results, settings.threshold) : [];
+
+  const [bookState, setBookState] = useState<"idle" | "saving" | "saved">("idle");
+  const saveFailedToPhrasebook = async (lineIndexes: number[]) => {
+    setBookState("saving");
+    try {
+      const res = await addPhrases(
+        lineIndexes.map((i) => ({ text: lines[i].text, source: "script" as const, context: script.title || undefined })),
+      );
+      setBookState("saved");
+      toast.success("Đã lưu vào sổ tay câu", {
+        description: res.existing ? `Thêm ${res.added} câu, ${res.existing} câu đã có sẵn.` : `Thêm ${res.added} câu.`,
+      });
+    } catch (err) {
+      setBookState("idle");
+      toast.error("Chưa lưu được vào sổ tay", {
+        description: aiErrorText(err instanceof AiRequestError ? err.code : "network"),
+      });
+    }
+  };
   const current = lines[idx];
   const currentResult = results[idx];
   const myTurn = isMine(idx);
@@ -372,6 +397,22 @@ export default function Practice({
                 <Button variant="outline" onClick={onExit}>
                   Sửa kịch bản
                 </Button>
+                {failed.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    disabled={bookState !== "idle"}
+                    onClick={() => void saveFailedToPhrasebook(failed)}
+                  >
+                    {bookState === "saving" ? (
+                      <Loader2Icon className="animate-spin" />
+                    ) : bookState === "saved" ? (
+                      <CheckIcon className="text-success" />
+                    ) : (
+                      <NotebookPenIcon />
+                    )}
+                    {bookState === "saved" ? "Đã lưu vào sổ tay" : `Lưu ${failed.length} câu chưa đạt vào sổ tay`}
+                  </Button>
+                )}
               </CardFooter>
             </Card>
           )}

@@ -6,6 +6,7 @@ import {
   Loader2Icon,
   LogOutIcon,
   MicIcon,
+  NotebookPenIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -23,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { aiErrorText, AiRequestError, postJSON, readAiError } from "@/lib/ai-errors";
 import { LEVELS, TOPICS, CUSTOM_TOPIC_ID, type ChatRole, type ChatTurn, type Feedback } from "@/lib/chat/prompts";
 import { CHAT_SCRIPT_ME, chatToScript, type ChatSummary, type Correction } from "@/lib/chat/summary";
+import { addPhrases } from "@/lib/phrases-client";
 import { createScript } from "@/lib/scripts-client";
 import { queueScriptForPractice, type SavedScript } from "@/lib/settings";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
@@ -31,7 +33,15 @@ import type { ChatSettings } from "./ChatPractice";
 import SessionSummary, { type SummaryState } from "./SessionSummary";
 
 type FeedbackState = { status: "loading" } | { status: "done"; data: Feedback } | { status: "error" };
-type UiTurn = { id: number; role: ChatRole; text: string; streaming?: boolean; feedback?: FeedbackState };
+type UiTurn = {
+  id: number;
+  role: ChatRole;
+  text: string;
+  streaming?: boolean;
+  feedback?: FeedbackState;
+  /** The corrected sentence was saved to the phrasebook. */
+  inPhrasebook?: boolean;
+};
 type Phase = "thinking" | "speaking" | "listening" | "waiting" | "paused" | "error" | "summary";
 
 const toHistory = (turns: UiTurn[]): ChatTurn[] =>
@@ -183,6 +193,19 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
       feedbackAborts.current.delete(ac);
     }
     if (aliveRef.current) updateTurn(id, { feedback: next });
+    if (next.status === "done" && next.data.verdict !== "good") void saveCorrection(id, utterance, next.data);
+  };
+
+  /** Corrected sentences go to the phrasebook automatically, so they can be reviewed later. */
+  const saveCorrection = async (id: number, utterance: string, fb: Feedback) => {
+    try {
+      await addPhrases([
+        { text: fb.corrected, original: utterance, note: fb.explanation, source: "chat", context: topicLabel },
+      ]);
+      if (aliveRef.current) updateTurn(id, { inPhrasebook: true });
+    } catch {
+      // Not critical: the correction is still shown and listed in the end-of-session summary.
+    }
   };
 
   const submitUser = (raw: string) => {
@@ -384,6 +407,17 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
         onContinue={continueChat}
         onNewSession={onExit}
         onPlay={playOnce}
+        onAddPhrase={async (item) => {
+          try {
+            await addPhrases([item]);
+            return true;
+          } catch (err) {
+            toast.error("Chưa lưu được vào sổ tay", {
+              description: aiErrorText(err instanceof AiRequestError ? err.code : "network"),
+            });
+            return false;
+          }
+        }}
       />
     );
   }
@@ -442,6 +476,11 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
                   <p className="leading-relaxed">{turn.text}</p>
                 </div>
                 <FeedbackView feedback={turn.feedback} onPlay={replay} canPlay={phase !== "thinking"} />
+                {turn.inPhrasebook && (
+                  <p className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
+                    <NotebookPenIcon className="size-3" /> Đã lưu vào sổ tay câu
+                  </p>
+                )}
               </div>
             ),
           )}

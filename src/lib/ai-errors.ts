@@ -13,7 +13,7 @@ export const AI_ERROR_TEXT: Record<string, string> = {
   network: "Không kết nối được tới server. Kiểm tra mạng rồi thử lại.",
   db_not_configured: "Server chưa có MONGODB_URI nên chưa lưu được kịch bản. Xem phần cấu hình trong README.",
   db_error: "Không kết nối được cơ sở dữ liệu. Thử lại sau ít phút.",
-  not_found: "Không tìm thấy kịch bản này (có thể đã bị xoá ở thiết bị khác).",
+  not_found: "Không tìm thấy mục này (có thể đã bị xoá ở thiết bị khác).",
   unauthorized: "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.",
   auth_not_configured: "Server chưa đặt APP_ACCESS_CODE.",
 };
@@ -46,7 +46,7 @@ export async function readAiError(res: Response): Promise<AiRequestError> {
 
 /** Send a request to one of the app's API routes and return the parsed JSON body. */
 export async function requestJSON<T>(
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   url: string,
   body?: unknown,
   signal?: AbortSignal,

@@ -1,6 +1,7 @@
 import { ArrowRightIcon } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import DueReviewBanner from "@/components/phrases/DueReviewBanner";
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { FEATURES } from "@/lib/features";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,8 @@ export default function HomePage() {
           đúng tới đâu.
         </p>
       </div>
+
+      <DueReviewBanner />
 
       <div className="grid gap-4 sm:grid-cols-2">
         {FEATURES.map((f) => {

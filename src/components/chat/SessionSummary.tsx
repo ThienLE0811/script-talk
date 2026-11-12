@@ -4,8 +4,10 @@ import {
   ArrowRightIcon,
   BookmarkPlusIcon,
   CheckCircle2Icon,
+  CheckIcon,
   Loader2Icon,
   MessageCircleIcon,
+  NotebookPenIcon,
   PlusIcon,
   RotateCcwIcon,
   ScrollTextIcon,
@@ -13,10 +15,12 @@ import {
   TriangleAlertIcon,
   Volume2Icon,
 } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { aiErrorText } from "@/lib/ai-errors";
 import type { ChatSummary, Correction } from "@/lib/chat/summary";
+import type { NewPhrase } from "@/lib/phrasebook";
 
 export type SummaryState = { status: "loading" } | { status: "done"; data: ChatSummary } | { status: "error"; code: string };
 
@@ -35,6 +39,8 @@ type Props = {
   onContinue: () => void;
   onNewSession: () => void;
   onPlay: (text: string) => void;
+  /** Save a suggestion to the phrasebook. Resolves true when saved (or already there). */
+  onAddPhrase: (item: NewPhrase) => Promise<boolean>;
 };
 
 export default function SessionSummary(p: Props) {
@@ -73,7 +79,9 @@ export default function SessionSummary(p: Props) {
               </Button>
             </div>
           )}
-          {p.summary.status === "done" && <SummaryBody summary={p.summary.data} onPlay={p.onPlay} />}
+          {p.summary.status === "done" && (
+            <SummaryBody summary={p.summary.data} onPlay={p.onPlay} onAdd={p.onAddPhrase} context={p.topicLabel} />
+          )}
         </CardContent>
       </Card>
 
@@ -130,7 +138,17 @@ export default function SessionSummary(p: Props) {
   );
 }
 
-function SummaryBody({ summary, onPlay }: { summary: ChatSummary; onPlay: (text: string) => void }) {
+function SummaryBody({
+  summary,
+  onPlay,
+  onAdd,
+  context,
+}: {
+  summary: ChatSummary;
+  onPlay: (text: string) => void;
+  onAdd: (item: NewPhrase) => Promise<boolean>;
+  context: string;
+}) {
   return (
     <>
       <p className="leading-relaxed">{summary.overall}</p>
@@ -159,6 +177,11 @@ function SummaryBody({ summary, onPlay }: { summary: ChatSummary; onPlay: (text:
                 <div className="mt-1 flex items-center gap-1">
                   <p className="font-medium">Nên nói: “{f.better}”</p>
                   <PlayButton text={f.better} onPlay={onPlay} />
+                  <AddButton
+                    onAdd={() =>
+                      onAdd({ text: f.better, original: f.example || undefined, note: f.issue, source: "chat", context })
+                    }
+                  />
                 </div>
               </li>
             ))}
@@ -177,12 +200,39 @@ function SummaryBody({ summary, onPlay }: { summary: ChatSummary; onPlay: (text:
                 <span className="font-medium">{ph.phrase}</span>
                 <span className="text-muted-foreground">: {ph.meaning}</span>
                 <PlayButton text={ph.phrase} onPlay={onPlay} />
+                <AddButton onAdd={() => onAdd({ text: ph.phrase, note: ph.meaning, source: "chat", context })} />
               </li>
             ))}
           </ul>
         </section>
       )}
     </>
+  );
+}
+
+function AddButton({ onAdd }: { onAdd: () => Promise<boolean> }) {
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  return (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      className="shrink-0 text-muted-foreground"
+      aria-label={state === "saved" ? "Đã lưu vào sổ tay" : "Lưu vào sổ tay câu"}
+      title={state === "saved" ? "Đã lưu vào sổ tay" : "Lưu vào sổ tay câu"}
+      disabled={state !== "idle"}
+      onClick={async () => {
+        setState("saving");
+        setState((await onAdd()) ? "saved" : "idle");
+      }}
+    >
+      {state === "saving" ? (
+        <Loader2Icon className="animate-spin" />
+      ) : state === "saved" ? (
+        <CheckIcon className="text-success" />
+      ) : (
+        <NotebookPenIcon />
+      )}
+    </Button>
   );
 }
 

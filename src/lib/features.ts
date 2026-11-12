@@ -1,4 +1,4 @@
-import { MessagesSquareIcon, ScrollTextIcon, type LucideIcon } from "lucide-react";
+import { MessagesSquareIcon, NotebookPenIcon, ScrollTextIcon, type LucideIcon } from "lucide-react";
 
 export type FeatureStatus = "ready" | "soon";
 
@@ -31,6 +31,14 @@ export const FEATURES: Feature[] = [
     href: "/chat",
     icon: MessagesSquareIcon,
     description: "Nói chuyện tự do với AI theo chủ đề bạn chọn, được góp ý ngữ pháp sau mỗi câu.",
+    status: "ready",
+  },
+  {
+    id: "phrases",
+    title: "Sổ tay câu",
+    href: "/phrases",
+    icon: NotebookPenIcon,
+    description: "Các câu đã được sửa và câu còn nói chưa tốt, ôn lại theo lịch để nhớ lâu: nghe mẫu, nói lại, chấm điểm.",
     status: "ready",
   },
 ];
