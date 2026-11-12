@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import { ThemeProvider } from "next-themes";
-import AppHeader from "@/components/layout/AppHeader";
-import AppSidebar from "@/components/layout/AppSidebar";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -31,15 +28,7 @@ export default function RootLayout({
       {/* Browser extensions (Grammarly, ColorZilla...) inject attributes on <body> before hydration. */}
       <body className="antialiased" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <TooltipProvider delayDuration={300}>
-            <SidebarProvider>
-              <AppSidebar />
-              <SidebarInset>
-                <AppHeader />
-                <div className="flex flex-1 flex-col">{children}</div>
-              </SidebarInset>
-            </SidebarProvider>
-          </TooltipProvider>
+          <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
           <Toaster position="top-center" />
         </ThemeProvider>
       </body>
