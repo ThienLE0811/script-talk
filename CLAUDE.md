@@ -20,12 +20,12 @@ Chưa có unit test. `next build` và `next dev` dùng chung thư mục `.next`,
 
 Biến môi trường (mẫu đầy đủ ở `.env.example`; trên Vercel đặt trong Environment Variables):
 
-| Biến | Dùng cho | Thiếu thì sao |
-| --- | --- | --- |
-| `APP_ACCESS_CODE` | Mã nhập ở `/login` | Dev: không khoá. Production: khoá toàn bộ (fail closed) |
-| `AUTH_SECRET` | Khoá ký cookie phiên (tuỳ chọn) | Dùng `APP_ACCESS_CODE` |
-| `MONGODB_URI`, `MONGODB_DB` | Lưu kịch bản (MongoDB Atlas) | Mục "Đã lưu" báo `db_not_configured`, không lưu được |
-| `GEMINI_API_KEY` | AI trò chuyện, góp ý, tổng kết, viết kịch bản | Các tính năng AI báo `missing_key` |
+| Biến                        | Dùng cho                                      | Thiếu thì sao                                           |
+| --------------------------- | --------------------------------------------- | ------------------------------------------------------- |
+| `APP_ACCESS_CODE`           | Mã nhập ở `/login`                            | Dev: không khoá. Production: khoá toàn bộ (fail closed) |
+| `AUTH_SECRET`               | Khoá ký cookie phiên (tuỳ chọn)               | Dùng `APP_ACCESS_CODE`                                  |
+| `MONGODB_URI`, `MONGODB_DB` | Lưu kịch bản (MongoDB Atlas)                  | Mục "Đã lưu" báo `db_not_configured`, không lưu được    |
+| `GEMINI_API_KEY`            | AI trò chuyện, góp ý, tổng kết, viết kịch bản | Các tính năng AI báo `missing_key`                      |
 
 Chế độ trò chuyện cần `GEMINI_API_KEY` trong `.env.local` (mẫu ở `.env.example`). Tuỳ chọn thêm `GEMINI_MODEL` (mặc định `gemini-3.6-flash`) và `GEMINI_FALLBACK_MODEL` (mặc định `gemini-3.5-flash-lite`). Dev server tự nạp lại `.env.local` khi file thay đổi ("Reload env"). Không có key thì `/chat` hiện hướng dẫn cấu hình, chế độ kịch bản vẫn chạy bình thường.
 
@@ -40,8 +40,11 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
   - `SpeechRecognition` / `webkitSpeechRecognition`: nhận câu người dùng nói.
 - Speech Recognition của Chrome gửi âm thanh lên server Google nên **cần Internet**. Không có mạng thì lỗi `network`, cần báo lỗi rõ cho người dùng.
 - **Đăng nhập (một người dùng, mã truy cập):** `src/middleware.ts` chặn mọi trang và API trừ `/login` và `/api/auth/*`. Trang chưa đăng nhập thì chuyển sang `/login?next=…`, API thì trả 401 `{ error: "unauthorized" }` (client tự chuyển sang `/login`). Cookie `st_session` = `<hạn>.<HMAC>` (Web Crypto, chạy được cả ở Edge), `HttpOnly`, 180 ngày. Đổi `APP_ACCESS_CODE` thì mọi phiên cũ mất hiệu lực (nếu không đặt `AUTH_SECRET`). Đăng nhập sai bị trễ 0,8 giây. `safeNextPath` dùng bộ phân tích URL để chặn chuyển hướng ra trang khác (`//evil`, `/\evil`, `/<tab>/evil`).
-- **Cơ sở dữ liệu: MongoDB** (driver `mongodb`), hiện chỉ có collection `scripts` (`_id` là id kịch bản dạng chuỗi, `title`, `raw`, `createdAt`, `updatedAt` dạng số ms). Kết nối cache trên `globalThis` (dev hot-reload và Vercel tái dùng). Chưa có `userId` vì chỉ có một người dùng.
-  - `GET/POST /api/scripts`, `PUT/DELETE /api/scripts/[id]`, `POST /api/scripts/import` (nhận file Xuất hoặc `{ scripts }`, gộp bằng `mergeScripts`, không bao giờ xoá).
+- **Cơ sở dữ liệu: MongoDB** (driver `mongodb`). Kết nối cache trên `globalThis` (dev hot-reload và Vercel tái dùng). Chưa có `userId` vì chỉ có một người dùng.
+  - Collection `scripts` (`_id` là id kịch bản dạng chuỗi, `title`, `raw`, `createdAt`, `updatedAt` dạng số ms): `GET/POST /api/scripts`, `PUT/DELETE /api/scripts/[id]`, `POST /api/scripts/import` (nhận file Xuất hoặc `{ scripts }`, gộp bằng `mergeScripts`, không bao giờ xoá).
+  - Collection `phrases` (sổ tay câu): `text`, `original?`, `note?`, `source` (`chat | script | manual`), `context?`, lịch ôn Leitner (`box` 0–6, `dueAt`, `reviews`, `lastScore`), và `key` = `phraseKey(text)` có **unique index** để cùng một câu (khác dấu câu, "I'm"/"I am") chỉ lưu một lần; thêm trùng thì giữ tiến độ cũ, chỉ điền `note`/`original` nếu đang thiếu. `GET/POST /api/phrases` (POST nhận `{ items }`, trả `{ added, existing }`), `PATCH /api/phrases/[id]` (`{ score, passed }` → lịch ôn mới), `DELETE /api/phrases/[id]`.
+  - Câu vào sổ tay: tự động khi AI góp ý "minor"/"fix" trong trò chuyện; bằng nút ở màn hình tổng kết trò chuyện và màn hình kết thúc kịch bản (câu chưa đạt; không tự động vì điểm thấp có thể do mic nghe nhầm); hoặc tự thêm ở trang `/phrases`.
+  - Ôn tập: đạt (≥ `REVIEW_PASS_SCORE` = 80%) thì lên hộp và nhắc lại sau 1, 2, 4, 8, 16, 32 ngày; chưa đạt thì về hộp 0, nhắc lại ngay lần sau. Chỉ **lần nói đầu tiên** của mỗi câu trong một buổi được ghi; luyện thêm không ghi lại.
   - Lỗi: `db_not_configured` (503), `db_error` (503), `not_found` (404), `bad_request` (400).
 - **Route gọi Gemini** bằng SDK `@google/genai` (`ai.models.generateContent` / `generateContentStream`). Chỉ có chữ đi qua server, không có âm thanh.
   - `POST /api/chat/reply`: nhận `{ topicId, customTopic?, level, history }`, stream câu trả lời dạng `text/plain`.
@@ -62,6 +65,8 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/lib/settings.ts`: kiểu `Settings`, `SavedScript`, giá trị mặc định và các hàm đọc/ghi `localStorage` có `try/catch`.
 - `src/lib/settings.ts` cũng chứa `STORAGE_KEYS` (mọi khoá `localStorage`) và `queueScriptForPractice` (ghi draft và vai để `/script` mở sẵn kịch bản, dùng khi lưu từ chế độ trò chuyện).
 - `src/lib/ai-errors.ts`: gọi API của chính app từ client (`requestJSON`, `postJSON`, `readAiError`, `AiRequestError`) và thông báo tiếng Việt cho mọi mã lỗi (`aiErrorText`: AI, DB, đăng nhập). Gặp 401 thì tự chuyển sang `/login`.
+- `src/lib/phrasebook.ts`: logic thuần của sổ tay (`Phrase`, `phraseKey`, `cleanPhraseText`, `scheduleAfterReview`, `reviewQueue`, `phraseStats`, `dueLabel`, `readNewPhrase`). `src/lib/phrases-client.ts`: gọi `/api/phrases` từ client. `src/lib/db/phrases.server.ts`: thao tác trên collection `phrases` (chỉ server).
+- `src/app/(app)/phrases/page.tsx`, `src/components/phrases/`: trang Sổ tay câu (`Phrasebook`: thống kê, thêm câu, lọc Cần ôn/Tất cả/Đã thuộc), buổi ôn (`PhraseReview`: máy trạng thái `speaking → listening → result/waiting → done`, dùng `tokenRef` như `Practice.tsx`), và `DueReviewBanner` trên trang chủ.
 - `src/lib/scripts-client.ts`: gọi `/api/scripts` từ client (`fetchScripts`, `createScript`, `updateScript`, `deleteScript`, `importScripts`).
 - `src/lib/auth/session.ts`: `authMode`, tạo/kiểm tra cookie phiên, `checkAccessCode` (so sánh thời gian hằng), `safeNextPath`. Không phụ thuộc Node, chạy được trong middleware.
 - `src/lib/db/mongo.server.ts`, `src/lib/db/scripts.server.ts`: **chỉ dùng ở server**. Kết nối MongoDB (`getDb`, null khi thiếu `MONGODB_URI`) và các thao tác trên collection `scripts`.
@@ -177,4 +182,6 @@ Ví dụ:
 feat(scoring): treat contractions as equal to expanded forms
 fix(parser): keep colons inside dialogue text
 docs: document note syntax in README
+``
+- không được thêm dòng "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" vào message commit
 ```
