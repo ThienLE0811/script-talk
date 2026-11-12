@@ -1,6 +1,15 @@
 "use client";
 
-import { FilePlusIcon, PlayIcon, SaveIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
+import {
+  DownloadIcon,
+  FilePlusIcon,
+  PlayIcon,
+  SaveIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  UploadIcon,
+} from "lucide-react";
+import { useRef } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +46,8 @@ type Props = {
   saved: SavedScript[];
   currentId: string | null;
   onSave: () => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
   onLoad: (s: SavedScript) => void;
   onDelete: (id: string) => void;
   onNew: () => void;
@@ -55,6 +66,7 @@ export default function Editor(p: Props) {
   const set = (patch: Partial<Settings>) => p.onSettingsChange({ ...s, ...patch });
   const machineSpeakers = parsed.speakers.filter((sp) => !p.myRoles.includes(sp));
   const myLineCount = parsed.lines.filter((l) => p.myRoles.includes(l.speaker)).length;
+  const fileRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -86,13 +98,36 @@ export default function Editor(p: Props) {
           trong <Kbd>(ngoặc)</Kbd> sẽ không được đọc và không tính điểm.
         </p>
 
-        {p.saved.length > 0 && (
-          <Card size="sm" className="mt-2 gap-0 py-0">
-            <CardHeader className="border-b py-3">
-              <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                Đã lưu
-              </CardTitle>
-            </CardHeader>
+        <Card size="sm" className="mt-2 gap-0 py-0">
+          <CardHeader className="flex items-center justify-between gap-2 border-b py-2">
+            <CardTitle className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Đã lưu {p.saved.length > 0 && `(${p.saved.length})`}
+            </CardTitle>
+            <div className="flex gap-1">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = ""; // allow picking the same file again
+                  if (file) p.onImport(file);
+                }}
+              />
+              <Button variant="ghost" size="sm" onClick={() => fileRef.current?.click()}>
+                <UploadIcon /> Nhập
+              </Button>
+              <Button variant="ghost" size="sm" onClick={p.onExport} disabled={p.saved.length === 0}>
+                <DownloadIcon /> Xuất
+              </Button>
+            </div>
+          </CardHeader>
+          {p.saved.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-muted-foreground">
+              Chưa có kịch bản nào được lưu. Bấm “Lưu kịch bản”, hoặc “Nhập” để mở file .json đã xuất trước đó.
+            </p>
+          ) : (
             <ul className="divide-y">
               {p.saved.map((item) => (
                 <li
@@ -130,8 +165,8 @@ export default function Editor(p: Props) {
                 </li>
               ))}
             </ul>
-          </Card>
-        )}
+          )}
+        </Card>
       </section>
 
       {/* Settings */}
