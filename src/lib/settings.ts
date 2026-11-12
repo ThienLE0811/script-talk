@@ -1,5 +1,3 @@
-import { newScriptId } from "./backup";
-
 export type LineMode = "full" | "hint" | "hidden";
 
 export type Settings = {
@@ -28,6 +26,7 @@ export type SavedScript = { id: string; title: string; raw: string; updatedAt: n
 export const STORAGE_KEYS = {
   draft: "scripttalk.draft",
   settings: "scripttalk.settings",
+  /** Legacy: saved scripts before MongoDB. Only read to migrate them, then removed. */
   saved: "scripttalk.saved",
   chatSettings: "scripttalk.chat.settings",
   generate: "scripttalk.generate",
@@ -59,13 +58,6 @@ export function saveJSON(key: string, value: unknown) {
   } catch {
     /* storage full or blocked: ignore */
   }
-}
-
-/** Add a script to the saved list from outside the script editor (e.g. the chat mode). */
-export function addSavedScript(title: string, raw: string): SavedScript {
-  const script: SavedScript = { id: newScriptId(), title, raw, updatedAt: Date.now() };
-  saveJSON(STORAGE_KEYS.saved, [script, ...loadArray<SavedScript>(STORAGE_KEYS.saved)]);
-  return script;
 }
 
 /** Make the script editor open `script` next time it mounts, with `myRole` as the learner's role. */

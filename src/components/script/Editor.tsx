@@ -1,9 +1,12 @@
 "use client";
 
 import {
+  CloudUploadIcon,
   DownloadIcon,
   FilePlusIcon,
+  Loader2Icon,
   PlayIcon,
+  RotateCcwIcon,
   SaveIcon,
   SparklesIcon,
   Trash2Icon,
@@ -32,8 +35,10 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { aiErrorText } from "@/lib/ai-errors";
 import type { ParsedScript } from "@/lib/script";
 import type { LineMode, SavedScript, Settings } from "@/lib/settings";
+import type { SavedStatus } from "./ScriptPractice";
 
 type Props = {
   raw: string;
@@ -46,6 +51,13 @@ type Props = {
   voiceFor: (speaker: string) => string | undefined;
   saved: SavedScript[];
   currentId: string | null;
+  savedStatus: SavedStatus;
+  onRetryLoad: () => void;
+  /** Scripts saved in this browser before the database existed, not yet on the server. */
+  localOnlyCount: number;
+  onMigrateLocal: () => void;
+  /** A save / delete / import is in progress. */
+  busy: boolean;
   onSave: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
@@ -69,6 +81,7 @@ export default function Editor(p: Props) {
   const machineSpeakers = parsed.speakers.filter((sp) => !p.myRoles.includes(sp));
   const myLineCount = parsed.lines.filter((l) => p.myRoles.includes(l.speaker)).length;
   const fileRef = useRef<HTMLInputElement>(null);
+  const ready = p.savedStatus.state === "ready";
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -85,7 +98,7 @@ export default function Editor(p: Props) {
             <Button variant="outline" size="sm" onClick={p.onNew}>
               <FilePlusIcon /> Mới
             </Button>
-            <Button variant="outline" size="sm" onClick={p.onSave} disabled={!parsed.lines.length}>
+            <Button variant="outline" size="sm" onClick={p.onSave} disabled={!parsed.lines.length || !ready || p.busy}>
               <SaveIcon /> {p.currentId ? "Lưu thay đổi" : "Lưu kịch bản"}
             </Button>
           </div>
@@ -120,7 +133,12 @@ export default function Editor(p: Props) {
                   if (file) p.onImport(file);
                 }}
               />
-              <Button variant="ghost" size="sm" onClick={() => fileRef.current?.click()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fileRef.current?.click()}
+                disabled={!ready || p.busy}
+              >
                 <UploadIcon /> Nhập
               </Button>
               <Button variant="ghost" size="sm" onClick={p.onExport} disabled={p.saved.length === 0}>
@@ -128,7 +146,31 @@ export default function Editor(p: Props) {
               </Button>
             </div>
           </CardHeader>
-          {p.saved.length === 0 ? (
+          {ready && p.localOnlyCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b bg-accent/50 px-3 py-2.5 text-sm">
+              <CloudUploadIcon className="size-4 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1">
+                Có {p.localOnlyCount} kịch bản chỉ nằm trong trình duyệt này, chưa có trên server.
+              </span>
+              <Button size="sm" onClick={p.onMigrateLocal} disabled={p.busy}>
+                Chuyển lên server
+              </Button>
+            </div>
+          )}
+          {p.savedStatus.state === "loading" ? (
+            <p className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" /> Đang tải kịch bản…
+            </p>
+          ) : p.savedStatus.state === "error" ? (
+            <div className="flex flex-col items-start gap-2 px-3 py-4 text-sm">
+              <p className="flex gap-2 text-destructive">
+                <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" /> {aiErrorText(p.savedStatus.code)}
+              </p>
+              <Button variant="outline" size="sm" onClick={p.onRetryLoad}>
+                <RotateCcwIcon /> Thử lại
+              </Button>
+            </div>
+          ) : p.saved.length === 0 ? (
             <p className="px-3 py-4 text-sm text-muted-foreground">
               Chưa có kịch bản nào được lưu. Bấm “Lưu kịch bản”, hoặc “Nhập” để mở file .json đã xuất trước đó.
             </p>

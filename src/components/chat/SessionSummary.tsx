@@ -27,6 +27,8 @@ type Props = {
   summary: SummaryState;
   /** True once this exact conversation has been saved as a script. */
   saved: boolean;
+  /** Saving to the server is in progress. */
+  saving: boolean;
   onRetrySummary: () => void;
   onSaveScript: () => void;
   onPracticeScript: () => void;
@@ -109,8 +111,8 @@ export default function SessionSummary(p: Props) {
               <ScrollTextIcon /> Luyện kịch bản này <ArrowRightIcon />
             </Button>
           ) : (
-            <Button className="self-start" onClick={p.onSaveScript}>
-              <BookmarkPlusIcon /> Lưu thành kịch bản
+            <Button className="self-start" onClick={p.onSaveScript} disabled={p.saving}>
+              {p.saving ? <Loader2Icon className="animate-spin" /> : <BookmarkPlusIcon />} Lưu thành kịch bản
             </Button>
           )}
         </CardContent>

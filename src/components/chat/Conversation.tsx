@@ -23,7 +23,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { aiErrorText, AiRequestError, postJSON, readAiError } from "@/lib/ai-errors";
 import { LEVELS, TOPICS, CUSTOM_TOPIC_ID, type ChatRole, type ChatTurn, type Feedback } from "@/lib/chat/prompts";
 import { CHAT_SCRIPT_ME, chatToScript, type ChatSummary, type Correction } from "@/lib/chat/summary";
-import { addSavedScript, queueScriptForPractice, type SavedScript } from "@/lib/settings";
+import { createScript } from "@/lib/scripts-client";
+import { queueScriptForPractice, type SavedScript } from "@/lib/settings";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
 import { cn } from "@/lib/utils";
 import type { ChatSettings } from "./ChatPractice";
@@ -279,7 +280,9 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
     resume();
   };
 
-  const saveAsScript = () => {
+  const [savingScript, setSavingScript] = useState(false);
+  const saveAsScript = async () => {
+    if (savingScript) return;
     const list = doneTurns();
     const corrected = new Map(correctionsOf(list).map((c) => [c.original, c.corrected]));
     const title = `${topicLabel} · ${new Date().toLocaleDateString("vi-VN")}`;
@@ -287,12 +290,22 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
       list.map((t) => ({ role: t.role, text: t.text, corrected: t.role === "user" ? corrected.get(t.text) : undefined })),
       title,
     );
-    const script = addSavedScript(title, raw);
-    setSavedScript({ script, turnCount: list.length });
-    toast.success("Đã lưu thành kịch bản", {
-      description: "Xem trong mục “Đã lưu” ở chế độ Luyện theo kịch bản.",
-      action: { label: "Luyện ngay", onClick: () => practiceScript(script) },
-    });
+    setSavingScript(true);
+    try {
+      const script = await createScript(title, raw);
+      if (!aliveRef.current) return;
+      setSavedScript({ script, turnCount: list.length });
+      toast.success("Đã lưu thành kịch bản", {
+        description: "Xem trong mục “Đã lưu” ở chế độ Luyện theo kịch bản.",
+        action: { label: "Luyện ngay", onClick: () => practiceScript(script) },
+      });
+    } catch (err) {
+      toast.error("Chưa lưu được kịch bản", {
+        description: aiErrorText(err instanceof AiRequestError ? err.code : "network"),
+      });
+    } finally {
+      if (aliveRef.current) setSavingScript(false);
+    }
   };
 
   const practiceScript = (script: SavedScript) => {
@@ -365,7 +378,8 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
         summary={summary}
         saved={savedScript?.turnCount === list.length}
         onRetrySummary={() => void fetchSummary()}
-        onSaveScript={saveAsScript}
+        onSaveScript={() => void saveAsScript()}
+        saving={savingScript}
         onPracticeScript={() => savedScript && practiceScript(savedScript.script)}
         onContinue={continueChat}
         onNewSession={onExit}

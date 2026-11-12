@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import Editor from "./Editor";
 import GenerateScriptDialog from "./GenerateScriptDialog";
 import Practice from "./Practice";
-import { backupFileName, buildBackup, MAX_IMPORT_BYTES, mergeScripts, newScriptId, parseBackup } from "@/lib/backup";
+import { aiErrorText, AiRequestError } from "@/lib/ai-errors";
+import { backupFileName, buildBackup, MAX_IMPORT_BYTES, parseBackup } from "@/lib/backup";
 import { parseScript, SAMPLE_SCRIPT, type ParsedScript } from "@/lib/script";
 import type { GeneratedScript } from "@/lib/generate-script";
 import { buildRetryScript } from "@/lib/practice";
@@ -19,17 +20,31 @@ import {
   type SavedScript,
   type Settings,
 } from "@/lib/settings";
+import {
+  createScript,
+  deleteScript,
+  fetchScripts,
+  importScripts,
+  updateScript,
+  type ImportSummary,
+} from "@/lib/scripts-client";
 import { isRecognitionSupported, stopSpeaking, useEnglishVoices } from "@/lib/speech";
 
 const K_DRAFT = STORAGE_KEYS.draft;
 const K_SETTINGS = STORAGE_KEYS.settings;
-const K_SAVED = STORAGE_KEYS.saved;
+/** Where scripts were saved before the database existed; read only to migrate them. */
+const K_LEGACY_SAVED = STORAGE_KEYS.saved;
+
+export type SavedStatus = { state: "loading" } | { state: "ready" } | { state: "error"; code: string };
 
 /** The "practice from your own script" mode: editor + spoken dialogue practice. */
 export default function ScriptPractice() {
   const [raw, setRaw] = useState(SAMPLE_SCRIPT);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [saved, setSaved] = useState<SavedScript[]>([]);
+  const [savedStatus, setSavedStatus] = useState<SavedStatus>({ state: "loading" });
+  const [localOnly, setLocalOnly] = useState<SavedScript[]>([]);
+  const [busy, setBusy] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [mode, setMode] = useState<"edit" | "practice">("edit");
   // The script being practised: the whole script, or a subset when retrying missed lines.
@@ -46,9 +61,10 @@ export default function ScriptPractice() {
     setRaw(draft.raw);
     setCurrentId(draft.currentId);
     setSettings(loadJSON(K_SETTINGS, DEFAULT_SETTINGS));
-    setSaved(loadArray<SavedScript>(K_SAVED));
     setRecSupported(isRecognitionSupported());
     setLoaded(true);
+    void refreshSaved();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   }, []);
 
   useEffect(() => {
@@ -77,28 +93,102 @@ export default function ScriptPractice() {
     return voices[k % voices.length].voiceURI;
   };
 
-  const persistSaved = (list: SavedScript[]) => {
-    setSaved(list);
-    saveJSON(K_SAVED, list);
-  };
+  /* ---------- Saved scripts (MongoDB via /api/scripts) ---------- */
 
-  const onSave = () => {
-    const title = parsed.title || parsed.lines[0]?.text.slice(0, 40) || "Kịch bản";
-    const now = Date.now();
-    if (currentId && saved.some((s) => s.id === currentId)) {
-      persistSaved(
-        saved
-          .map((s) => (s.id === currentId ? { ...s, title, raw, updatedAt: now } : s))
-          .sort((a, b) => b.updatedAt - a.updatedAt),
-      );
-      toast.success("Đã lưu thay đổi", { description: title });
-    } else {
-      const id = newScriptId();
-      persistSaved([{ id, title, raw, updatedAt: now }, ...saved]);
-      setCurrentId(id);
-      toast.success("Đã lưu kịch bản", { description: title });
+  const sortNewest = (list: SavedScript[]) => [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+  const errorCode = (err: unknown) => (err instanceof AiRequestError ? err.code : "network");
+  const showError = (title: string, err: unknown) =>
+    toast.error(title, { description: (err as AiRequestError)?.detail ?? aiErrorText(errorCode(err)) });
+
+  const refreshSaved = async () => {
+    setSavedStatus({ state: "loading" });
+    try {
+      const list = await fetchScripts();
+      setSaved(list);
+      setSavedStatus({ state: "ready" });
+      // Scripts saved in this browser before the database existed and not on the server yet.
+      const legacy = loadArray<SavedScript>(K_LEGACY_SAVED);
+      setLocalOnly(legacy.filter((l) => !list.some((s) => s.id === l.id && s.raw === l.raw)));
+    } catch (err) {
+      setSavedStatus({ state: "error", code: errorCode(err) });
     }
   };
+
+  /** Run one save/delete/import at a time so double clicks cannot create duplicates. */
+  const withBusy = async (fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSave = () =>
+    withBusy(async () => {
+      const title = parsed.title || parsed.lines[0]?.text.slice(0, 40) || "Kịch bản";
+      try {
+        if (currentId && saved.some((s) => s.id === currentId)) {
+          try {
+            const updated = await updateScript(currentId, title, raw);
+            setSaved((list) => sortNewest(list.map((s) => (s.id === updated.id ? updated : s))));
+            toast.success("Đã lưu thay đổi", { description: title });
+            return;
+          } catch (err) {
+            if (errorCode(err) !== "not_found") throw err;
+            // Deleted on another device: save as a new script instead of losing the edit.
+          }
+        }
+        const created = await createScript(title, raw);
+        setSaved((list) => [created, ...list.filter((s) => s.id !== currentId)]);
+        setCurrentId(created.id);
+        toast.success("Đã lưu kịch bản", { description: title });
+      } catch (err) {
+        showError("Chưa lưu được kịch bản", err);
+      }
+    });
+
+  const onDelete = (id: string) =>
+    withBusy(async () => {
+      try {
+        await deleteScript(id);
+      } catch (err) {
+        if (errorCode(err) !== "not_found") {
+          showError("Chưa xoá được kịch bản", err);
+          return;
+        }
+      }
+      setSaved((list) => list.filter((s) => s.id !== id));
+      if (id === currentId) setCurrentId(null);
+    });
+
+  const announceImport = (r: ImportSummary) => {
+    const parts = [
+      r.added && `thêm ${r.added}`,
+      r.updated && `cập nhật ${r.updated}`,
+      r.skipped && `bỏ qua ${r.skipped} bản đã có`,
+    ].filter(Boolean);
+    if (r.added || r.updated) toast.success("Đã nhập kịch bản", { description: parts.join(", ") });
+    else toast.info("Không có gì mới", { description: "Tất cả kịch bản đều đã có sẵn." });
+  };
+
+  const onMigrateLocal = () =>
+    withBusy(async () => {
+      try {
+        const res = await importScripts({ scripts: loadArray<SavedScript>(K_LEGACY_SAVED) });
+        setSaved(res.scripts);
+        setLocalOnly([]);
+        try {
+          localStorage.removeItem(K_LEGACY_SAVED); // now safely on the server
+        } catch {
+          /* ignore */
+        }
+        announceImport(res);
+      } catch (err) {
+        showError("Chưa chuyển được kịch bản lên server", err);
+      }
+    });
 
   const onExport = () => {
     if (!saved.length) return;
@@ -114,33 +204,33 @@ export default function ScriptPractice() {
     toast.success(`Đã xuất ${saved.length} kịch bản`, { description: a.download });
   };
 
-  const onImport = async (file: File) => {
-    if (file.size > MAX_IMPORT_BYTES) {
-      toast.error("File quá lớn", { description: "Giới hạn 2 MB." });
-      return;
-    }
-    let text: string;
-    try {
-      text = await file.text();
-    } catch {
-      toast.error("Không đọc được file");
-      return;
-    }
-    const parsedFile = parseBackup(text);
-    if (!parsedFile.ok) {
-      toast.error("Không nhập được kịch bản", { description: parsedFile.error });
-      return;
-    }
-    const { list, added, updated, skipped } = mergeScripts(saved, parsedFile.scripts);
-    persistSaved(list);
-    const parts = [
-      added && `thêm ${added}`,
-      updated && `cập nhật ${updated}`,
-      skipped && `bỏ qua ${skipped} bản đã có`,
-    ].filter(Boolean);
-    if (added || updated) toast.success("Đã nhập kịch bản", { description: parts.join(", ") });
-    else toast.info("Không có gì mới", { description: "Tất cả kịch bản trong file đều đã có sẵn." });
-  };
+  const onImport = (file: File) =>
+    withBusy(async () => {
+      if (file.size > MAX_IMPORT_BYTES) {
+        toast.error("File quá lớn", { description: "Giới hạn 2 MB." });
+        return;
+      }
+      let text: string;
+      try {
+        text = await file.text();
+      } catch {
+        toast.error("Không đọc được file");
+        return;
+      }
+      // Check locally first for a clear message; the server validates again.
+      const check = parseBackup(text);
+      if (!check.ok) {
+        toast.error("Không nhập được kịch bản", { description: check.error });
+        return;
+      }
+      try {
+        const res = await importScripts(text);
+        setSaved(res.scripts);
+        announceImport(res);
+      } catch (err) {
+        showError("Không nhập được kịch bản", err);
+      }
+    });
 
   const switchMode = (next: "edit" | "practice") => {
     if (next === "edit") stopSpeaking();
@@ -196,18 +286,20 @@ export default function ScriptPractice() {
         voices={voices}
         voiceFor={voiceFor}
         saved={saved}
+        savedStatus={savedStatus}
+        onRetryLoad={() => void refreshSaved()}
+        localOnlyCount={localOnly.length}
+        onMigrateLocal={() => void onMigrateLocal()}
+        busy={busy}
         currentId={currentId}
-        onSave={onSave}
+        onSave={() => void onSave()}
         onExport={onExport}
-        onImport={onImport}
+        onImport={(file) => void onImport(file)}
         onLoad={(s) => {
           setRaw(s.raw);
           setCurrentId(s.id);
         }}
-        onDelete={(id) => {
-          persistSaved(saved.filter((s) => s.id !== id));
-          if (id === currentId) setCurrentId(null);
-        }}
+        onDelete={(id) => void onDelete(id)}
         onNew={() => {
           setRaw("# \nA: \nB: \n");
           setCurrentId(null);
