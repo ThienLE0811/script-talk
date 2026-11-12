@@ -7,6 +7,15 @@
 | Luyện theo kịch bản: máy đọc các vai còn lại, bạn nói vai của mình và được chấm điểm từng từ | `/script` |
 | Trò chuyện tự nhiên: nói chuyện tự do với AI theo chủ đề, được góp ý ngữ pháp sau mỗi câu | `/chat` |
 
+Vòng luyện tập gợi ý:
+
+1. **AI viết kịch bản**: bấm "AI viết" ở chế độ kịch bản, nhập tình huống (tiếng Việt cũng được). Gemini soạn hội thoại hai vai và chọn sẵn vai cho bạn.
+2. **Luyện kịch bản**: hết bài, bấm "Luyện lại N câu chưa đạt" để chỉ luyện những câu dưới điểm đạt (kèm câu dẫn của đối phương).
+3. **Trò chuyện tự do** theo cùng chủ đề. Bấm "Kết thúc" để xem tổng kết: điểm mạnh, lỗi cần luyện, cụm từ nên học.
+4. **Lưu thành kịch bản** từ màn hình tổng kết: câu của bạn được thay bằng bản đã sửa, rồi luyện lại cho thuộc.
+
+Các bước 1, 3, 4 cần Gemini API key (xem phần cấu hình bên dưới).
+
 ## Chạy
 
 ```bash
