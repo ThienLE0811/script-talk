@@ -6,13 +6,14 @@
 | --- | --- |
 | Luyện theo kịch bản: máy đọc các vai còn lại, bạn nói vai của mình và được chấm điểm từng từ | `/script` |
 | Trò chuyện tự nhiên: nói chuyện tự do với AI theo chủ đề, được góp ý ngữ pháp sau mỗi câu | `/chat` |
+| Trang chủ: tiến độ (chuỗi ngày luyện, số buổi, câu đã nói, nhiệm vụ hoàn thành, tỷ lệ câu tự nhiên theo buổi, lỗi hay gặp gần đây) | `/` |
 | Sổ tay câu: các câu đã được sửa và câu còn nói chưa tốt, ôn theo lịch nhắc lại (nghe mẫu → nói lại → chấm điểm) | `/phrases` |
 
 Vòng luyện tập gợi ý:
 
 1. **AI viết kịch bản**: bấm "AI viết" ở chế độ kịch bản, nhập tình huống (tiếng Việt cũng được). Gemini soạn hội thoại hai vai và chọn sẵn vai cho bạn.
 2. **Luyện kịch bản**: hết bài, bấm "Luyện lại N câu chưa đạt" để chỉ luyện những câu dưới điểm đạt (kèm câu dẫn của đối phương).
-3. **Trò chuyện tự do** theo cùng chủ đề. Bấm "Kết thúc" để xem tổng kết: điểm mạnh, lỗi cần luyện, cụm từ nên học.
+3. **Trò chuyện tự do** theo cùng chủ đề. Bật "Nhận nhiệm vụ" để AI giao 3 mục tiêu cụ thể (ví dụ đặt phòng 2 đêm, hỏi bữa sáng, xin giảm giá) và đánh dấu khi bạn làm được. AI bắt đầu đọc ngay từ câu đầu tiên của lời đáp. Bí thì bấm nút bóng đèn (phím H) để xem 2–3 câu có thể nói kèm nghĩa tiếng Việt; nghe không kịp thì bấm "Dịch" dưới câu của AI. Bấm "Kết thúc" để xem tổng kết: điểm mạnh, lỗi cần luyện, cụm từ nên học.
 4. **Lưu thành kịch bản** từ màn hình tổng kết: câu của bạn được thay bằng bản đã sửa, rồi luyện lại cho thuộc.
 5. **Ôn sổ tay câu** mỗi ngày: câu được AI sửa tự vào sổ tay; câu chưa đạt khi luyện kịch bản và các cụm từ trong tổng kết có nút lưu. Câu đạt được nhắc lại thưa dần (1, 2, 4, 8… ngày), câu chưa đạt được nhắc lại ngay lần sau. Trang chủ nhắc khi có câu cần ôn.
 
@@ -87,7 +88,7 @@ Kịch bản đã lưu nằm trên server (MongoDB). Nút **Xuất** ở mục "
 - Luyện và chấm điểm kịch bản chạy ngay trên trình duyệt.
 - Backend là các API route của Next.js: `/api/scripts/*` đọc/ghi MongoDB, còn `/api/chat/*` và `/api/script/generate` gọi Gemini. Chỉ có câu chữ đi qua server, không có âm thanh.
 - Mọi trang và API đều cần đăng nhập bằng mã truy cập (middleware), nên người khác có link cũng không đọc được dữ liệu hay dùng lượt Gemini của bạn.
-- Bản nháp đang soạn và cài đặt (vai, giọng, tốc độ…) lưu trong `localStorage` vì gắn với từng thiết bị. Cuộc trò chuyện chưa được lưu (trừ khi bấm "Lưu thành kịch bản").
+- Bản nháp đang soạn và cài đặt (vai, giọng, tốc độ…) lưu trong `localStorage` vì gắn với từng thiết bị. Các buổi trò chuyện tự lưu vào MongoDB (collection `chats`): xem lại ở mục "Buổi trò chuyện gần đây" trong trang Trò chuyện, mở ra để đọc tổng kết, lời thoại, hoặc nói tiếp.
 
 ## Phím tắt khi luyện
 
@@ -95,4 +96,5 @@ Kịch bản đã lưu nằm trên server (MongoDB). Nút **Xuất** ở mục "
 | --- | --- | --- |
 | Space | Bật mic / dừng nói | Bật mic / dừng nói |
 | Enter | Sang câu tiếp | — |
+| H | — | Gợi ý trả lời |
 | Esc | Tạm dừng | Tạm dừng |

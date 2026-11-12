@@ -3,7 +3,7 @@
 Hướng dẫn cho Claude khi làm việc trong repo **ScriptTalk**: ứng dụng web luyện nói tiếng Anh. Có hai chế độ:
 
 - **Luyện theo kịch bản** (`/script`): máy đọc các vai còn lại (TTS), người dùng nói vai của mình (Speech Recognition) và được chấm điểm từng từ. Luyện và chấm điểm chạy hoàn toàn trên trình duyệt; riêng nút "AI viết" gọi Gemini để soạn kịch bản. Hết bài có nút luyện lại riêng các câu chưa đạt.
-- **Trò chuyện tự nhiên** (`/chat`): người dùng nói tự do với AI (Gemini) theo chủ đề, AI trả lời bằng giọng nói và góp ý ngữ pháp sau mỗi câu. Bấm "Kết thúc" sẽ có tổng kết do AI viết, và có thể lưu buổi trò chuyện thành kịch bản (câu của người học dùng bản đã sửa) để luyện lại.
+- **Trò chuyện tự nhiên** (`/chat`): người dùng nói tự do với AI (Gemini) theo chủ đề, AI trả lời bằng giọng nói và góp ý ngữ pháp sau mỗi câu. Có thể nhận "nhiệm vụ" (3 mục tiêu cụ thể, AI đánh dấu khi làm được). Buổi trò chuyện tự lưu vào lịch sử, mở lại được để xem hoặc nói tiếp. Bấm "Kết thúc" sẽ có tổng kết do AI viết, và có thể lưu buổi trò chuyện thành kịch bản (câu của người học dùng bản đã sửa) để luyện lại.
 
 ## Lệnh
 
@@ -43,6 +43,8 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - **Cơ sở dữ liệu: MongoDB** (driver `mongodb`). Kết nối cache trên `globalThis` (dev hot-reload và Vercel tái dùng). Chưa có `userId` vì chỉ có một người dùng.
   - Collection `scripts` (`_id` là id kịch bản dạng chuỗi, `title`, `raw`, `createdAt`, `updatedAt` dạng số ms): `GET/POST /api/scripts`, `PUT/DELETE /api/scripts/[id]`, `POST /api/scripts/import` (nhận file Xuất hoặc `{ scripts }`, gộp bằng `mergeScripts`, không bao giờ xoá).
   - Collection `phrases` (sổ tay câu): `text`, `original?`, `note?`, `source` (`chat | script | manual`), `context?`, lịch ôn Leitner (`box` 0–6, `dueAt`, `reviews`, `lastScore`), và `key` = `phraseKey(text)` có **unique index** để cùng một câu (khác dấu câu, "I'm"/"I am") chỉ lưu một lần; thêm trùng thì giữ tiến độ cũ, chỉ điền `note`/`original` nếu đang thiếu. `GET/POST /api/phrases` (POST nhận `{ items }`, trả `{ added, existing }`), `PATCH /api/phrases/[id]` (`{ score, passed }` → lịch ôn mới), `DELETE /api/phrases/[id]`.
+  - Collection `chats` (lịch sử trò chuyện, index `updatedAt`): `_id` do client tạo (`newScriptId`), `topicId`, `customTopic?`, `level`, `topicLabel`, `mission?`, `turns` (`{ role, text, feedback? }`, feedback có `goalsDone` khi có nhiệm vụ), `summary?`, `stats` (server tính bằng `sessionStats`), `activity` (mốc thời gian mỗi lần lưu có thêm câu của người học, tối đa 100; dùng tính chuỗi ngày, nên mở lại buổi cũ để xem không tính là luyện), `createdAt`, `updatedAt`. `GET /api/chats` (danh sách không kèm lời thoại, tối đa 500), `GET/PUT/DELETE /api/chats/[id]` (PUT ghi đè cả buổi, tạo mới nếu chưa có; trường không còn như `summary` cũ thì bị `$unset`).
+  - Client tự lưu buổi trò chuyện (debounce 1,5 giây sau mỗi thay đổi, khoá JSON để bỏ qua khi không đổi), lưu nốt bằng `fetch` `keepalive` khi rời trang (`pagehide`) hoặc thoát. Tổng kết chỉ được lưu khi còn khớp số lượt (nói tiếp sau tổng kết thì tổng kết cũ bị gỡ).
   - Câu vào sổ tay: tự động khi AI góp ý "minor"/"fix" trong trò chuyện; bằng nút ở màn hình tổng kết trò chuyện và màn hình kết thúc kịch bản (câu chưa đạt; không tự động vì điểm thấp có thể do mic nghe nhầm); hoặc tự thêm ở trang `/phrases`.
   - Ôn tập: đạt (≥ `REVIEW_PASS_SCORE` = 80%) thì lên hộp và nhắc lại sau 1, 2, 4, 8, 16, 32 ngày; chưa đạt thì về hộp 0, nhắc lại ngay lần sau. Chỉ **lần nói đầu tiên** của mỗi câu trong một buổi được ghi; luyện thêm không ghi lại.
   - Lỗi: `db_not_configured` (503), `db_error` (503), `not_found` (404), `bad_request` (400).
@@ -50,10 +52,13 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
   - `POST /api/chat/reply`: nhận `{ topicId, customTopic?, level, history }`, stream câu trả lời dạng `text/plain`.
   - `POST /api/chat/feedback`: nhận `{ level, history, utterance }`, trả JSON `Feedback` (`verdict`, `corrected`, `explanation`) qua `responseJsonSchema`.
   - `POST /api/chat/summary`: nhận `{ topicId, customTopic?, level, history, corrections }`, trả JSON `ChatSummary` (`overall`, `strengths`, `focus`, `phrases`; giải thích bằng tiếng Việt).
+  - `POST /api/chat/suggest`: nhận `{ topicId, customTopic?, level, history }`, trả `{ suggestions }` (2–3 câu người học có thể nói tiếp, kèm nghĩa tiếng Việt). Nút bóng đèn / phím H; bấm gợi ý thì máy đọc mẫu rồi bật mic.
+  - `POST /api/chat/mission`: nhận `{ topicId, customTopic?, level }`, trả `Mission` (`brief` và 3 `goals`, tiếng Việt). `reply`, `suggest`, `feedback`, `summary` đều nhận thêm `mission?` (feedback và summary nhận cả `goalsDone`): vai AI không làm hộ mục tiêu, feedback trả `goalsDone` là các mục tiêu câu vừa nói hoàn thành, summary nhận xét đã xong nhiệm vụ chưa.
+  - `POST /api/chat/translate`: nhận `{ text }`, trả `{ vi }` (bản dịch một câu của AI). Nút "Dịch" dưới mỗi câu, kết quả giữ trong state của lượt đó.
   - `POST /api/script/generate`: nhận `{ topic, level, length }`, trả `GeneratedScript` (`raw` đã đúng cú pháp kịch bản, `learnerRole`, `partnerRole`). Model trả JSON theo schema, server tự ghép thành text và làm sạch tên vai (chỉ chữ cái và khoảng trắng) để parser không hiểu sai.
   - Mọi lời gọi đi qua `withModelFallback`: thử `GEMINI_MODEL` trước, gặp 503 (quá tải), 429 (hết lượt, quota gói miễn phí tính riêng theo model), 500 hoặc quá `REQUEST_TIMEOUT_MS` (20 giây) thì chuyển sang model dự phòng. Request bị client huỷ thì dừng ngay. Model mới ra (ví dụ `gemini-3.8-flash`) từng trả 503 "high demand" liên tục, nên mặc định dùng bản Stable.
   - Lỗi trả về `{ error: code }` với `code` thuộc `missing_key | invalid_key | rate_limited | overloaded | timeout | bad_request | upstream_error`; client đổi mã này thành thông báo tiếng Việt (`aiErrorText` trong `src/lib/ai-errors.ts`, dùng chung cho cả mã lỗi DB và đăng nhập). Gemini báo key sai bằng 400 "API key not valid", không phải 401. SDK báo quá thời gian bằng `AbortError`, giống khi client huỷ, nên phân biệt bằng `req.signal.aborted`.
-  - Hội thoại không được lưu ở server: client gửi kèm lịch sử (chỉ chữ) mỗi lần gọi, server cắt còn `MAX_TURNS` lượt gần nhất.
+  - Các route AI không đọc DB: client gửi kèm lịch sử (chỉ chữ) mỗi lần gọi, server cắt còn `MAX_TURNS` lượt gần nhất.
   - Các route AI được middleware bảo vệ như mọi API khác, nhưng chưa có giới hạn lượt gọi.
 - **Lưu trữ:** kịch bản đã lưu nằm trong MongoDB. Bản nháp đang soạn và các cài đặt (vai, giọng, tốc độ…) vẫn ở `localStorage` vì gắn với từng thiết bị. Kịch bản cũ trong `localStorage` (`scripttalk.saved`) được chuyển lên server bằng nút "Chuyển lên server" rồi xoá khỏi trình duyệt.
 - Không tự thêm backend mới, database/collection mới, API key, dịch vụ STT/TTS bên ngoài hay thư viện nặng nếu chưa được yêu cầu. Không đổi nhà cung cấp AI (đang là Gemini, theo lựa chọn của chủ dự án) khi chưa hỏi.
@@ -67,6 +72,7 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/lib/ai-errors.ts`: gọi API của chính app từ client (`requestJSON`, `postJSON`, `readAiError`, `AiRequestError`) và thông báo tiếng Việt cho mọi mã lỗi (`aiErrorText`: AI, DB, đăng nhập). Gặp 401 thì tự chuyển sang `/login`.
 - `src/lib/phrasebook.ts`: logic thuần của sổ tay (`Phrase`, `phraseKey`, `cleanPhraseText`, `scheduleAfterReview`, `reviewQueue`, `phraseStats`, `dueLabel`, `readNewPhrase`). `src/lib/phrases-client.ts`: gọi `/api/phrases` từ client. `src/lib/db/phrases.server.ts`: thao tác trên collection `phrases` (chỉ server).
 - `src/app/(app)/phrases/page.tsx`, `src/components/phrases/`: trang Sổ tay câu (`Phrasebook`: thống kê, thêm câu, lọc Cần ôn/Tất cả/Đã thuộc), buổi ôn (`PhraseReview`: máy trạng thái `speaking → listening → result/waiting → done`, dùng `tokenRef` như `Practice.tsx`), và `DueReviewBanner` trên trang chủ.
+- `src/lib/progress.ts`: logic thuần cho phần Tiến độ (`practiceDays` theo giờ địa phương từ `activity` của buổi trò chuyện và `lastReviewedAt` của sổ tay, `streaks`, `recentDays`, `progressOverview`, `relativeDayLabel`). `src/components/progress/ProgressOverview.tsx`: hiển thị trên trang chủ (ô số liệu, dải 14 ngày, cột tỷ lệ câu tự nhiên theo buổi, lỗi hay gặp lấy từ `summary.focus`). Không hiện gì khi chưa có dữ liệu. Luyện kịch bản chưa được ghi nhận vào chuỗi ngày.
 - `src/lib/scripts-client.ts`: gọi `/api/scripts` từ client (`fetchScripts`, `createScript`, `updateScript`, `deleteScript`, `importScripts`).
 - `src/lib/auth/session.ts`: `authMode`, tạo/kiểm tra cookie phiên, `checkAccessCode` (so sánh thời gian hằng), `safeNextPath`. Không phụ thuộc Node, chạy được trong middleware.
 - `src/lib/db/mongo.server.ts`, `src/lib/db/scripts.server.ts`: **chỉ dùng ở server**. Kết nối MongoDB (`getDb`, null khi thiếu `MONGODB_URI`) và các thao tác trên collection `scripts`.
@@ -75,6 +81,9 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/app/api/scripts/**`: API kịch bản (xem mục Kiến trúc).
 - `src/lib/generate-script.ts`: logic thuần cho "AI viết kịch bản" (prompt, `GENERATE_SCHEMA`, `toGeneratedScript`, `cleanRoleName`, `SCRIPT_LENGTHS`, `TOPIC_SUGGESTIONS`).
 - `src/lib/practice.ts`: `failedLineIndexes` (câu của người học bị bỏ qua, chưa trả lời hoặc dưới điểm đạt) và `buildRetryScript` (kịch bản con gồm các câu đó, mỗi câu kèm câu của đối phương ngay trước).
+- `src/lib/chat/mission.ts`: logic thuần cho nhiệm vụ (`Mission`, `readMission`, `readGoalIndexes`, prompt soạn nhiệm vụ, đoạn prompt thêm cho vai AI / góp ý / tổng kết).
+- `src/lib/chat/history.ts`: kiểu `ChatSession`, `ChatSessionMeta`, `readChatSessionInput` (kiểm tra dữ liệu client gửi lên), `sessionStats`, `completedGoals`. `src/lib/db/chats.server.ts`: thao tác trên collection `chats` (chỉ server). `src/lib/chats-client.ts`: gọi `/api/chats` từ client.
+- `src/lib/chat/assist.ts`: logic thuần cho phần trợ giúp khi trò chuyện: `takeSentences` (tách câu đã stream xong để đọc ngay, không cắt `3.5`, `Mr.`), prompt/schema/parse của gợi ý trả lời, prompt dịch.
 - `src/lib/chat/summary.ts`: logic thuần cho tổng kết (`SUMMARY_SCHEMA`, prompt, `parseSummary`) và `chatToScript` (vai `Partner` / `Me`).
 - `src/lib/backup.ts`: logic thuần cho nút Xuất / Nhập kịch bản ra file `.json`. Gồm `buildBackup`, `parseBackup` (nhận cả object `{ app: "scripttalk", type: "scripts", version, exportedAt, scripts }` lẫn mảng `[{ raw, title? }]` viết tay), `mergeScripts` (trùng id thì giữ bản sửa mới hơn, trùng nội dung thì bỏ qua) và `newScriptId`. Định dạng file là hợp đồng với người dùng: giữ tương thích ngược, tăng `BACKUP_VERSION` khi đổi cấu trúc.
 - `src/lib/features.ts`: danh sách các chế độ luyện tập (`FEATURES`). Sidebar, trang chủ và breadcrumb đều đọc từ đây. Thêm chế độ mới = thêm một mục ở đây (`status: "ready" | "soon"`) và tạo route `src/app/(app)/<href>/page.tsx`.
@@ -87,9 +96,11 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/lib/chat/prompts.ts`: logic thuần của chế độ trò chuyện. Gồm `TOPICS`, `LEVELS`, prompt (`buildReplySystemPrompt`, `buildFeedbackSystemPrompt`, `START_INSTRUCTION`), `FEEDBACK_SCHEMA`, `parseFeedback`, `sanitizeHistory`.
 - `src/lib/chat/gemini.server.ts`: **chỉ dùng ở server** (đọc `GEMINI_API_KEY`). Tạo client, `GEMINI_MODEL`, đổi lỗi SDK thành mã lỗi. Không import từ client component.
 - `src/components/script/GenerateScriptDialog.tsx`: hộp thoại "AI viết kịch bản" (chủ đề, trình độ, độ dài).
-- `src/components/chat/SessionSummary.tsx`: màn hình tổng kết buổi trò chuyện (thống kê, nhận xét AI, các câu đã sửa, lưu thành kịch bản, trò chuyện tiếp, buổi mới).
+- `src/components/chat/RecentChats.tsx`: danh sách buổi trò chuyện gần đây ở màn hình chọn chủ đề (mở lại, xoá). Mở lại thì `Conversation` nhận `initial` và bắt đầu ở màn hình tổng kết; "Trò chuyện tiếp" nói tiếp buổi đó với chủ đề và trình độ cũ.
+- `src/components/chat/MissionBar.tsx`: thẻ nhiệm vụ (đầu cuộc trò chuyện và trong tổng kết) và dòng tiến độ nhiệm vụ trên thanh điều khiển.
+- `src/components/chat/SessionSummary.tsx`: màn hình tổng kết buổi trò chuyện (thống kê, nhiệm vụ, nhận xét AI, lời thoại thu gọn, các câu đã sửa, lưu thành kịch bản, trò chuyện tiếp, buổi mới).
 - `src/components/chat/ChatPractice.tsx`: màn hình chọn chủ đề, trình độ, giọng, tốc độ, và màn hình hướng dẫn khi thiếu key.
-- `src/components/chat/Conversation.tsx`: phiên trò chuyện. Là máy trạng thái `thinking → speaking → listening → waiting/…`, dùng `tokenRef` như `Practice.tsx`, và huỷ thêm cả request đang chạy (`AbortController`) khi ngắt. Góp ý được lấy song song và không bị huỷ khi hội thoại chạy tiếp.
+- `src/components/chat/Conversation.tsx`: phiên trò chuyện. Là máy trạng thái `thinking → speaking → listening → waiting/…`, dùng `tokenRef` như `Practice.tsx`, và huỷ thêm cả request đang chạy (`AbortController`) khi ngắt. Lời đáp được đọc theo từng câu ngay khi stream xong câu đó (chuỗi Promise nối các lần `speak`, dừng khi token đổi hoặc stream lỗi); trong lúc đang trả lời (`replying`) không cho phát câu khác. Góp ý được lấy song song và không bị huỷ khi hội thoại chạy tiếp.
 - `src/app/globals.css`: Tailwind v4 và theme token của shadcn (màu chủ đạo indigo, thêm token `success`, bộ token `--sidebar-*`), sáng/tối theo class `.dark`.
 - `src/components/layout/`: `AppSidebar` (menu, tự đóng sau khi chọn trên mobile, nút "Đăng xuất" khi bật mã truy cập), `AppHeader` (nút mở menu, breadcrumb, `ThemeToggle`), `ThemeToggle`.
 - `src/components/script/ScriptPractice.tsx`: giữ state của chế độ kịch bản, chuyển giữa soạn (`edit`) và luyện (`practice`). Kịch bản đã lưu đọc/ghi qua `/api/scripts`; mỗi lần chỉ chạy một thao tác lưu/xoá/nhập (`busy`). Lưu một kịch bản đã bị xoá ở thiết bị khác thì tạo bản mới thay vì mất nội dung.
@@ -104,7 +115,7 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 | `scripttalk.draft`         | `{ raw, currentId }`: kịch bản đang soạn                              |
 | `scripttalk.settings`      | `Settings`: được merge với `DEFAULT_SETTINGS` khi đọc                 |
 | `scripttalk.saved`         | Cũ: kịch bản đã lưu trước khi có MongoDB                              |
-| `scripttalk.chat.settings` | `ChatSettings`: chủ đề, trình độ, giọng, tốc độ của chế độ trò chuyện |
+| `scripttalk.chat.settings` | `ChatSettings`: chủ đề, trình độ, giọng, tốc độ, bật nhiệm vụ (`mission`) |
 | `scripttalk.generate`      | `{ level, length }`: lựa chọn gần nhất trong hộp thoại "AI viết"      |
 
 ## Định dạng kịch bản (hợp đồng với người dùng, giữ ổn định)
@@ -148,11 +159,12 @@ Khi sửa parser:
 
 ## Phím tắt khi luyện
 
-| Phím  | Tác dụng           |
-| ----- | ------------------ |
-| Space | Bật mic / dừng nói |
-| Enter | Sang câu tiếp      |
-| Esc   | Tạm dừng           |
+| Phím  | Tác dụng                                |
+| ----- | --------------------------------------- |
+| Space | Bật mic / dừng nói                      |
+| Enter | Sang câu tiếp                           |
+| H     | Gợi ý trả lời (chỉ ở chế độ trò chuyện) |
+| Esc   | Tạm dừng                                |
 
 Phím tắt **không được kích hoạt khi đang gõ** trong ô soạn kịch bản hoặc input. Nhớ `preventDefault` cho Space để trang không bị cuộn.
 
