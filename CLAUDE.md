@@ -120,7 +120,7 @@ Phím tắt **không được kích hoạt khi đang gõ** trong ô soạn kịc
 - Mỗi commit là một thay đổi logic. Không gộp refactor với sửa lỗi.
 - Trước khi commit: chạy lint/build (nếu có) và thử lại luồng nói trên Chrome khi sửa phần `speech`.
 - Không commit `node_modules/`, file build, `.env` hay file cá nhân của editor.
-- Tên nhánh: `<type>/<mô-tả-ngắn>`, ví dụ `feat/repeat-line`, `fix/colon-in-dialogue`.
+- Commit thẳng trên `main`, không tạo nhánh tính năng (`feat/...`, `fix/...`).
 
 Ví dụ:
 
