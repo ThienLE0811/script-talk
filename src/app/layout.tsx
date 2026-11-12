@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import { ThemeProvider } from "next-themes";
+import AppHeader from "@/components/layout/AppHeader";
+import AppSidebar from "@/components/layout/AppSidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -12,8 +15,8 @@ const sans = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: "ScriptTalk: luyện hội thoại tiếng Anh",
-  description: "Soạn kịch bản, máy đóng một vai, bạn đóng vai còn lại.",
+  title: { default: "ScriptTalk: luyện nói tiếng Anh", template: "%s · ScriptTalk" },
+  description: "Luyện nói tiếng Anh: hội thoại theo kịch bản tự soạn và nhiều chế độ luyện tập khác.",
 };
 
 export default function RootLayout({
@@ -28,7 +31,15 @@ export default function RootLayout({
       {/* Browser extensions (Grammarly, ColorZilla...) inject attributes on <body> before hydration. */}
       <body className="antialiased" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
+          <TooltipProvider delayDuration={300}>
+            <SidebarProvider>
+              <AppSidebar />
+              <SidebarInset>
+                <AppHeader />
+                <div className="flex flex-1 flex-col">{children}</div>
+              </SidebarInset>
+            </SidebarProvider>
+          </TooltipProvider>
           <Toaster position="top-center" />
         </ThemeProvider>
       </body>

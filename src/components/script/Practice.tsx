@@ -51,7 +51,6 @@ export default function Practice({ script, myRoles, settings, voiceFor, recSuppo
 
   const tokenRef = useRef(0);
   const recRef = useRef<ListenController | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const isMine = (i: number) => myRoles.includes(lines[i]?.speaker);
 
   /** Cancel anything in flight and return a fresh token for the next action. */
@@ -173,8 +172,9 @@ export default function Practice({ script, myRoles, settings, voiceFor, recSuppo
     };
   }, []);
 
+  // New lines are appended at the bottom; the control bar is sticky, so scroll the page to the end.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
   }, [idx, phase, interim]);
 
   // Keyboard: Space = mic / stop, Enter = next, Esc = pause.
@@ -213,152 +213,153 @@ export default function Practice({ script, myRoles, settings, voiceFor, recSuppo
   const myTurn = isMine(idx);
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col">
-      {/* Top bar */}
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" onClick={onExit}>
-          <ArrowLeftIcon /> Kịch bản
-        </Button>
-        <div className="min-w-0 truncate text-sm font-medium">{script.title || "Hội thoại"}</div>
-        <Badge variant="secondary" className="tabular-nums">
-          {Math.min(idx + 1, lines.length)}/{lines.length}
-        </Badge>
-      </div>
-      <Progress value={(idx / lines.length) * 100} className="mb-6 h-1" />
+    <div className="flex flex-1 flex-col">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pt-4">
+        {/* Top bar */}
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <Button variant="ghost" size="sm" onClick={onExit}>
+            <ArrowLeftIcon /> Kịch bản
+          </Button>
+          <div className="min-w-0 truncate text-sm font-medium">{script.title || "Hội thoại"}</div>
+          <Badge variant="secondary" className="tabular-nums">
+            {Math.min(idx + 1, lines.length)}/{lines.length}
+          </Badge>
+        </div>
+        <Progress value={(idx / lines.length) * 100} className="mb-6 h-1" />
 
-      {/* Conversation */}
-      <div className="flex flex-col gap-4 pb-56">
-        {lines.slice(0, Math.min(idx + 1, lines.length)).map((line, i) => {
-          const active = i === idx && phase !== "done";
-          if (!isMine(i)) {
-            const showText = settings.showPartnerText || revealed[i];
-            const speaking = active && phase === "speaking";
-            return (
-              <div key={line.id} className="flex max-w-[85%] flex-col items-start gap-1">
-                <span className="px-1 text-xs font-medium text-muted-foreground">{line.speaker}</span>
-                <div
-                  className={cn(
-                    "rounded-2xl rounded-tl-sm border bg-card px-4 py-3 shadow-xs",
-                    speaking && "ring-2 ring-primary/40",
-                  )}
-                >
-                  {showText ? (
-                    <p className="leading-relaxed">{line.text}</p>
-                  ) : (
+        {/* Conversation */}
+        <div className="flex flex-1 flex-col gap-4 pb-6">
+          {lines.slice(0, Math.min(idx + 1, lines.length)).map((line, i) => {
+            const active = i === idx && phase !== "done";
+            if (!isMine(i)) {
+              const showText = settings.showPartnerText || revealed[i];
+              const speaking = active && phase === "speaking";
+              return (
+                <div key={line.id} className="flex max-w-[85%] flex-col items-start gap-1">
+                  <span className="px-1 text-xs font-medium text-muted-foreground">{line.speaker}</span>
+                  <div
+                    className={cn(
+                      "rounded-2xl rounded-tl-sm border bg-card px-4 py-3 shadow-xs",
+                      speaking && "ring-2 ring-primary/40",
+                    )}
+                  >
+                    {showText ? (
+                      <p className="leading-relaxed">{line.text}</p>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-2 text-muted-foreground"
+                        onClick={() => setRevealed((r) => ({ ...r, [i]: true }))}
+                      >
+                        <EyeIcon /> Bấm để xem chữ
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="-ml-2 text-muted-foreground"
-                      onClick={() => setRevealed((r) => ({ ...r, [i]: true }))}
+                      size="xs"
+                      className="-ml-2 mt-1 text-muted-foreground"
+                      onClick={() => playLine(i)}
                     >
-                      <EyeIcon /> Bấm để xem chữ
+                      <Volume2Icon className={cn(speaking && "animate-pulse text-primary")} />
+                      {speaking ? "Đang đọc…" : "Nghe lại"}
                     </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="-ml-2 mt-1 text-muted-foreground"
-                    onClick={() => playLine(i)}
-                  >
-                    <Volume2Icon className={cn(speaking && "animate-pulse text-primary")} />
-                    {speaking ? "Đang đọc…" : "Nghe lại"}
-                  </Button>
+                  </div>
                 </div>
-              </div>
-            );
-          }
+              );
+            }
 
-          const res = results[i];
-          const mode: LineMode = res ? "full" : (peek[i] ?? settings.myLineMode);
-          return (
-            <div key={line.id} className="flex max-w-[85%] flex-col items-end gap-1 self-end">
-              <span className="px-1 text-xs font-medium text-muted-foreground">{line.speaker} (bạn)</span>
-              <div
-                className={cn(
-                  "rounded-2xl rounded-tr-sm border border-primary/20 bg-accent px-4 py-3 text-accent-foreground",
-                  active && "ring-2 ring-primary/50",
-                )}
-              >
-                {res && !("skipped" in res) ? (
-                  <>
-                    <p className="leading-relaxed">
-                      {res.words.map((w, k) => (
-                        <span
-                          key={k}
+            const res = results[i];
+            const mode: LineMode = res ? "full" : (peek[i] ?? settings.myLineMode);
+            return (
+              <div key={line.id} className="flex max-w-[85%] flex-col items-end gap-1 self-end">
+                <span className="px-1 text-xs font-medium text-muted-foreground">{line.speaker} (bạn)</span>
+                <div
+                  className={cn(
+                    "rounded-2xl rounded-tr-sm border border-primary/20 bg-accent px-4 py-3 text-accent-foreground",
+                    active && "ring-2 ring-primary/50",
+                  )}
+                >
+                  {res && !("skipped" in res) ? (
+                    <>
+                      <p className="leading-relaxed">
+                        {res.words.map((w, k) => (
+                          <span
+                            key={k}
+                            className={cn(
+                              w.status === "ok" && "text-success",
+                              w.status === "miss" &&
+                                "rounded bg-destructive/10 text-destructive underline decoration-wavy decoration-destructive/60 underline-offset-4",
+                              w.status === "neutral" && "text-muted-foreground",
+                            )}
+                          >
+                            {w.text}{" "}
+                          </span>
+                        ))}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between gap-3 border-t border-primary/15 pt-2 text-xs">
+                        <span className="text-muted-foreground italic">Bạn nói: “{res.spoken}”</span>
+                        <Badge
                           className={cn(
-                            w.status === "ok" && "text-success",
-                            w.status === "miss" &&
-                              "rounded bg-destructive/10 text-destructive underline decoration-wavy decoration-destructive/60 underline-offset-4",
-                            w.status === "neutral" && "text-muted-foreground",
+                            "tabular-nums",
+                            res.score >= settings.threshold
+                              ? "bg-success/15 text-success"
+                              : "bg-destructive/15 text-destructive",
                           )}
                         >
-                          {w.text}{" "}
-                        </span>
-                      ))}
-                    </p>
-                    <div className="mt-2 flex items-center justify-between gap-3 border-t border-primary/15 pt-2 text-xs">
-                      <span className="text-muted-foreground italic">Bạn nói: “{res.spoken}”</span>
-                      <Badge
-                        className={cn(
-                          "tabular-nums",
-                          res.score >= settings.threshold
-                            ? "bg-success/15 text-success"
-                            : "bg-destructive/15 text-destructive",
-                        )}
-                      >
-                        {res.score}%
-                      </Badge>
-                    </div>
-                  </>
-                ) : mode === "hidden" ? (
-                  <p className="text-muted-foreground italic">Đến lượt bạn…</p>
-                ) : (
-                  <p className="leading-relaxed">{mode === "hint" ? hintText(line.text) : line.text}</p>
-                )}
-                {res && "skipped" in res && <p className="mt-1 text-xs text-muted-foreground">(đã bỏ qua)</p>}
-                {active && !res && mode !== "full" && (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="-ml-2 mt-1 text-muted-foreground"
-                    onClick={() => setPeek((p) => ({ ...p, [i]: mode === "hidden" ? "hint" : "full" }))}
-                  >
-                    <EyeIcon /> {mode === "hidden" ? "Xem gợi ý" : "Xem cả câu"}
-                  </Button>
+                          {res.score}%
+                        </Badge>
+                      </div>
+                    </>
+                  ) : mode === "hidden" ? (
+                    <p className="text-muted-foreground italic">Đến lượt bạn…</p>
+                  ) : (
+                    <p className="leading-relaxed">{mode === "hint" ? hintText(line.text) : line.text}</p>
+                  )}
+                  {res && "skipped" in res && <p className="mt-1 text-xs text-muted-foreground">(đã bỏ qua)</p>}
+                  {active && !res && mode !== "full" && (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="-ml-2 mt-1 text-muted-foreground"
+                      onClick={() => setPeek((p) => ({ ...p, [i]: mode === "hidden" ? "hint" : "full" }))}
+                    >
+                      <EyeIcon /> {mode === "hidden" ? "Xem gợi ý" : "Xem cả câu"}
+                    </Button>
+                  )}
+                </div>
+                {active && phase === "listening" && (
+                  <p className="px-1 text-sm text-muted-foreground italic">{interim ? `“${interim}”` : "Đang nghe…"}</p>
                 )}
               </div>
-              {active && phase === "listening" && (
-                <p className="px-1 text-sm text-muted-foreground italic">{interim ? `“${interim}”` : "Đang nghe…"}</p>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
 
-        {phase === "done" && (
-          <Card className="mt-4 text-center">
-            <CardHeader>
-              <CardDescription>Hoàn thành hội thoại</CardDescription>
-              <CardTitle className="text-5xl font-semibold tabular-nums">{avg}%</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Điểm trung bình trên {scored.length}/{myTotal} câu của bạn
-            </CardContent>
-            <CardFooter className="justify-center gap-3">
-              <Button onClick={restart}>
-                <RotateCcwIcon /> Luyện lại
-              </Button>
-              <Button variant="outline" onClick={onExit}>
-                Sửa kịch bản
-              </Button>
-            </CardFooter>
-          </Card>
-        )}
-        <div ref={bottomRef} />
+          {phase === "done" && (
+            <Card className="mt-4 text-center">
+              <CardHeader>
+                <CardDescription>Hoàn thành hội thoại</CardDescription>
+                <CardTitle className="text-5xl font-semibold tabular-nums">{avg}%</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground">
+                Điểm trung bình trên {scored.length}/{myTotal} câu của bạn
+              </CardContent>
+              <CardFooter className="justify-center gap-3">
+                <Button onClick={restart}>
+                  <RotateCcwIcon /> Luyện lại
+                </Button>
+                <Button variant="outline" onClick={onExit}>
+                  Sửa kịch bản
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
+        </div>
       </div>
 
-      {/* Control bar */}
+      {/* Control bar: sticky inside the content area so it never covers the sidebar */}
       {phase !== "done" && current && (
-        <div className="fixed inset-x-0 bottom-0 border-t bg-background/85 backdrop-blur">
+        <div className="sticky bottom-0 z-10 border-t bg-background/85 backdrop-blur">
           <div className="mx-auto flex max-w-2xl flex-col gap-3 px-4 py-4">
             {notice && (
               <p className="flex items-center justify-center gap-1.5 text-center text-sm text-amber-600 dark:text-amber-400">
