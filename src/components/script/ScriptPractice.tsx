@@ -6,8 +6,9 @@ import Editor from "./Editor";
 import GenerateScriptDialog from "./GenerateScriptDialog";
 import Practice from "./Practice";
 import { backupFileName, buildBackup, MAX_IMPORT_BYTES, mergeScripts, newScriptId, parseBackup } from "@/lib/backup";
-import { parseScript, SAMPLE_SCRIPT } from "@/lib/script";
+import { parseScript, SAMPLE_SCRIPT, type ParsedScript } from "@/lib/script";
 import type { GeneratedScript } from "@/lib/generate-script";
+import { buildRetryScript } from "@/lib/practice";
 import {
   DEFAULT_SETTINGS,
   loadArray,
@@ -31,6 +32,9 @@ export default function ScriptPractice() {
   const [saved, setSaved] = useState<SavedScript[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [mode, setMode] = useState<"edit" | "practice">("edit");
+  // The script being practised: the whole script, or a subset when retrying missed lines.
+  const [practiceScript, setPracticeScript] = useState<ParsedScript | null>(null);
+  const [practiceKey, setPracticeKey] = useState(0);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [recSupported, setRecSupported] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -140,6 +144,7 @@ export default function ScriptPractice() {
 
   const switchMode = (next: "edit" | "practice") => {
     if (next === "edit") stopSpeaking();
+    else setPracticeScript(parsed);
     setMode(next);
     window.scrollTo({ top: 0 });
   };
@@ -153,16 +158,21 @@ export default function ScriptPractice() {
     });
   };
 
-
-  if (mode === "practice") {
+  if (mode === "practice" && practiceScript) {
     return (
       <Practice
-        script={parsed}
+        key={practiceKey}
+        script={practiceScript}
         myRoles={myRoles}
         settings={settings}
         voiceFor={voiceFor}
         recSupported={!!recSupported}
         onExit={() => switchMode("edit")}
+        onRetryLines={(lineIndexes) => {
+          setPracticeScript(buildRetryScript(practiceScript, myRoles, lineIndexes));
+          setPracticeKey((k) => k + 1); // remount Practice for a fresh session
+          window.scrollTo({ top: 0 });
+        }}
       />
     );
   }

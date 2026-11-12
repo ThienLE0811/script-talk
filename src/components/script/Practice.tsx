@@ -10,6 +10,7 @@ import {
   RotateCcwIcon,
   SkipForwardIcon,
   SquareIcon,
+  TargetIcon,
   TriangleAlertIcon,
   Volume2Icon,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { failedLineIndexes } from "@/lib/practice";
 import { cleanForSpeech, compareLine, hintText, type Comparison, type ParsedScript } from "@/lib/script";
 import type { LineMode, Settings } from "@/lib/settings";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
@@ -36,9 +38,19 @@ type Props = {
   voiceFor: (speaker: string) => string | undefined;
   recSupported: boolean;
   onExit: () => void;
+  /** Start a new session with only these learner lines (indexes into script.lines). */
+  onRetryLines?: (lineIndexes: number[]) => void;
 };
 
-export default function Practice({ script, myRoles, settings, voiceFor, recSupported, onExit }: Props) {
+export default function Practice({
+  script,
+  myRoles,
+  settings,
+  voiceFor,
+  recSupported,
+  onExit,
+  onRetryLines,
+}: Props) {
   const lines = script.lines;
   const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState<Phase>("speaking");
@@ -208,6 +220,7 @@ export default function Practice({ script, myRoles, settings, voiceFor, recSuppo
   const scored = Object.values(results).filter((r): r is Scored => !("skipped" in r));
   const avg = scored.length ? Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) : 0;
   const myTotal = lines.filter((_, i) => isMine(i)).length;
+  const failed = phase === "done" ? failedLineIndexes(script, myRoles, results, settings.threshold) : [];
   const current = lines[idx];
   const currentResult = results[idx];
   const myTurn = isMine(idx);
@@ -342,11 +355,19 @@ export default function Practice({ script, myRoles, settings, voiceFor, recSuppo
                 <CardTitle className="text-5xl font-semibold tabular-nums">{avg}%</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                Điểm trung bình trên {scored.length}/{myTotal} câu của bạn
+                Điểm trung bình trên {scored.length}/{myTotal} câu của bạn.{" "}
+                {failed.length > 0
+                  ? `Còn ${failed.length} câu chưa đạt ${settings.threshold}%.`
+                  : "Tất cả các câu đều đạt!"}
               </CardContent>
-              <CardFooter className="justify-center gap-3">
-                <Button onClick={restart}>
-                  <RotateCcwIcon /> Luyện lại
+              <CardFooter className="flex-wrap justify-center gap-3">
+                {failed.length > 0 && onRetryLines && (
+                  <Button onClick={() => onRetryLines(failed)}>
+                    <TargetIcon /> Luyện lại {failed.length} câu chưa đạt
+                  </Button>
+                )}
+                <Button variant={failed.length > 0 && onRetryLines ? "outline" : "default"} onClick={restart}>
+                  <RotateCcwIcon /> Luyện lại cả bài
                 </Button>
                 <Button variant="outline" onClick={onExit}>
                   Sửa kịch bản
