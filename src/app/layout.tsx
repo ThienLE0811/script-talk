@@ -25,7 +25,8 @@ export default function RootLayout({
     // The font variable must live on <html>: the root font-family rule reads it there,
     // and if it is only defined on <body> the root falls back to the browser default (Times).
     <html lang="vi" className={sans.variable} suppressHydrationWarning>
-      <body className="antialiased">
+      {/* Browser extensions (Grammarly, ColorZilla...) inject attributes on <body> before hydration. */}
+      <body className="antialiased" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
           <Toaster position="top-center" />
