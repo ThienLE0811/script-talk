@@ -6,12 +6,21 @@ import Editor from "./Editor";
 import Practice from "./Practice";
 import { backupFileName, buildBackup, MAX_IMPORT_BYTES, mergeScripts, newScriptId, parseBackup } from "@/lib/backup";
 import { parseScript, SAMPLE_SCRIPT } from "@/lib/script";
-import { DEFAULT_SETTINGS, loadArray, loadJSON, saveJSON, type SavedScript, type Settings } from "@/lib/settings";
+import {
+  DEFAULT_SETTINGS,
+  loadArray,
+  loadJSON,
+  saveJSON,
+  STORAGE_KEYS,
+  type Draft,
+  type SavedScript,
+  type Settings,
+} from "@/lib/settings";
 import { isRecognitionSupported, stopSpeaking, useEnglishVoices } from "@/lib/speech";
 
-const K_DRAFT = "scripttalk.draft";
-const K_SETTINGS = "scripttalk.settings";
-const K_SAVED = "scripttalk.saved";
+const K_DRAFT = STORAGE_KEYS.draft;
+const K_SETTINGS = STORAGE_KEYS.settings;
+const K_SAVED = STORAGE_KEYS.saved;
 
 /** The "practice from your own script" mode: editor + spoken dialogue practice. */
 export default function ScriptPractice() {
@@ -26,7 +35,7 @@ export default function ScriptPractice() {
 
   // Load persisted state after mount (localStorage is not available during SSR).
   useEffect(() => {
-    const draft = loadJSON<{ raw: string; currentId: string | null }>(K_DRAFT, { raw: SAMPLE_SCRIPT, currentId: null });
+    const draft = loadJSON<Draft>(K_DRAFT, { raw: SAMPLE_SCRIPT, currentId: null });
     setRaw(draft.raw);
     setCurrentId(draft.currentId);
     setSettings(loadJSON(K_SETTINGS, DEFAULT_SETTINGS));
@@ -131,6 +140,7 @@ export default function ScriptPractice() {
     setMode(next);
     window.scrollTo({ top: 0 });
   };
+
 
   if (mode === "practice") {
     return (

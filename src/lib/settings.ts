@@ -22,6 +22,16 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export type SavedScript = { id: string; title: string; raw: string; updatedAt: number };
 
+/** Every localStorage key the app uses. Changing a value's shape needs a migration. */
+export const STORAGE_KEYS = {
+  draft: "scripttalk.draft",
+  settings: "scripttalk.settings",
+  saved: "scripttalk.saved",
+  chatSettings: "scripttalk.chat.settings",
+} as const;
+
+export type Draft = { raw: string; currentId: string | null };
+
 export function loadJSON<T>(key: string, fallback: T): T {
   try {
     const v = localStorage.getItem(key);

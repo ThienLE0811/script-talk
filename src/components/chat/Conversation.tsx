@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { aiErrorText, AiRequestError, readAiError } from "@/lib/ai-errors";
 import { LEVELS, TOPICS, CUSTOM_TOPIC_ID, type ChatRole, type ChatTurn, type Feedback } from "@/lib/chat/prompts";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
 import { cn } from "@/lib/utils";
@@ -26,28 +27,6 @@ import type { ChatSettings } from "./ChatPractice";
 type FeedbackState = { status: "loading" } | { status: "done"; data: Feedback } | { status: "error" };
 type UiTurn = { id: number; role: ChatRole; text: string; streaming?: boolean; feedback?: FeedbackState };
 type Phase = "thinking" | "speaking" | "listening" | "waiting" | "paused" | "error";
-
-export const ERROR_TEXT: Record<string, string> = {
-  missing_key: "Server chưa có GEMINI_API_KEY.",
-  invalid_key: "API key không hợp lệ. Kiểm tra lại GEMINI_API_KEY trong .env.local.",
-  rate_limited: "Đã hết lượt gọi Gemini (gói miễn phí giới hạn theo phút và theo ngày). Đợi một lát rồi thử lại.",
-  overloaded: "Gemini đang quá tải, kể cả model dự phòng. Thử lại sau ít phút.",
-  timeout: "Gemini phản hồi quá lâu. Thử lại nhé.",
-  bad_request: "Yêu cầu gửi lên không hợp lệ.",
-  upstream_error: "Gemini đang gặp lỗi. Thử lại sau ít phút.",
-  network: "Không kết nối được tới server. Kiểm tra mạng rồi thử lại.",
-};
-
-class ChatError extends Error {
-  constructor(public code: string) {
-    super(code);
-  }
-}
-
-async function readError(res: Response): Promise<ChatError> {
-  const body = await res.json().catch(() => null);
-  return new ChatError(typeof body?.error === "string" ? body.error : "upstream_error");
-}
 
 const toHistory = (turns: UiTurn[]): ChatTurn[] =>
   turns.filter((t) => !t.streaming && t.text).map((t) => ({ role: t.role, text: t.text }));
@@ -152,7 +131,7 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
         body: JSON.stringify({ ...requestBase, history }),
         signal: ac.signal,
       });
-      if (!res.ok || !res.body) throw await readError(res);
+      if (!res.ok || !res.body) throw await readAiError(res);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       for (;;) {
@@ -163,11 +142,11 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
         updateTurn(id, { text });
       }
       text = (text + decoder.decode()).trim();
-      if (!text) throw new ChatError("upstream_error");
+      if (!text) throw new AiRequestError("upstream_error");
     } catch (err) {
       if (tokenRef.current !== token) return; // cancelled on purpose
       commit(turnsRef.current.filter((t) => t.id !== id));
-      setErrorCode(err instanceof ChatError ? err.code : "network");
+      setErrorCode(err instanceof AiRequestError ? err.code : "network");
       setPhase("error");
       return;
     }
@@ -352,7 +331,7 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
           {phase === "error" && errorCode && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-center text-sm">
               <p className="flex items-center gap-1.5 text-destructive">
-                <TriangleAlertIcon className="size-4 shrink-0" /> {ERROR_TEXT[errorCode] ?? ERROR_TEXT.upstream_error}
+                <TriangleAlertIcon className="size-4 shrink-0" /> {aiErrorText(errorCode)}
               </p>
               <Button size="sm" variant="outline" onClick={() => void askAI()}>
                 <RotateCcwIcon /> Thử lại
