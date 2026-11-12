@@ -1,6 +1,9 @@
 # CLAUDE.md
 
-Hướng dẫn cho Claude khi làm việc trong repo **ScriptTalk**: ứng dụng web luyện hội thoại tiếng Anh theo kịch bản. Máy đọc các vai còn lại (TTS), người dùng nói vai của mình (Speech Recognition) và được chấm điểm từng từ.
+Hướng dẫn cho Claude khi làm việc trong repo **ScriptTalk**: ứng dụng web luyện nói tiếng Anh. Có hai chế độ:
+
+- **Luyện theo kịch bản** (`/script`): máy đọc các vai còn lại (TTS), người dùng nói vai của mình (Speech Recognition) và được chấm điểm từng từ. Chạy hoàn toàn trên trình duyệt.
+- **Trò chuyện tự nhiên** (`/chat`): người dùng nói tự do với AI (Gemini) theo chủ đề, AI trả lời bằng giọng nói và góp ý ngữ pháp sau mỗi câu.
 
 ## Lệnh
 
@@ -15,18 +18,27 @@ npx tsc --noEmit   # chỉ kiểm tra type, nhanh hơn build
 
 Chưa có unit test. `next build` và `next dev` dùng chung thư mục `.next`, nên cần dừng dev server trước khi build.
 
+Chế độ trò chuyện cần `GEMINI_API_KEY` trong `.env.local` (mẫu ở `.env.example`). Tuỳ chọn thêm `GEMINI_MODEL` (mặc định `gemini-3.6-flash`) và `GEMINI_FALLBACK_MODEL` (mặc định `gemini-3.5-flash-lite`). Dev server tự nạp lại `.env.local` khi file thay đổi ("Reload env"). Không có key thì `/chat` hiện hướng dẫn cấu hình, chế độ kịch bản vẫn chạy bình thường.
+
 Thêm component shadcn/ui bằng `npx shadcn@latest add <tên>` (cấu hình trong `components.json`, style `radix-nova`). Các component trong `src/components/ui/` import `cn` từ package `cn` của shadcn, đây là bình thường.
 
 Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Firefox/Safari không hỗ trợ đầy đủ Speech Recognition, nên không dùng để xác nhận tính năng nói.
 
 ## Kiến trúc
 
-- **Chỉ có frontend, không có backend.** Mọi xử lý giọng nói dùng Web Speech API của trình duyệt:
-  - `speechSynthesis` (TTS): đọc câu của các vai máy.
+- **Giọng nói luôn xử lý trên trình duyệt**, ở cả hai chế độ, bằng Web Speech API:
+  - `speechSynthesis` (TTS): đọc câu của vai máy hoặc của AI.
   - `SpeechRecognition` / `webkitSpeechRecognition`: nhận câu người dùng nói.
 - Speech Recognition của Chrome gửi âm thanh lên server Google nên **cần Internet**. Không có mạng thì lỗi `network`, cần báo lỗi rõ cho người dùng.
+- **Backend duy nhất là hai route handler của chế độ trò chuyện**, gọi Gemini bằng SDK `@google/genai` (`ai.models.generateContent` / `generateContentStream`). Chỉ có chữ đi qua server, không có âm thanh.
+  - `POST /api/chat/reply`: nhận `{ topicId, customTopic?, level, history }`, stream câu trả lời dạng `text/plain`.
+  - `POST /api/chat/feedback`: nhận `{ level, history, utterance }`, trả JSON `Feedback` (`verdict`, `corrected`, `explanation`) qua `responseJsonSchema`.
+  - Mọi lời gọi đi qua `withModelFallback`: thử `GEMINI_MODEL` trước, gặp 503 (quá tải), 429 (hết lượt, quota gói miễn phí tính riêng theo model), 500 hoặc quá `REQUEST_TIMEOUT_MS` (20 giây) thì chuyển sang model dự phòng. Request bị client huỷ thì dừng ngay. Model mới ra (ví dụ `gemini-3.8-flash`) từng trả 503 "high demand" liên tục, nên mặc định dùng bản Stable.
+  - Lỗi trả về `{ error: code }` với `code` thuộc `missing_key | invalid_key | rate_limited | overloaded | timeout | bad_request | upstream_error`; client đổi mã này thành thông báo tiếng Việt (`ERROR_TEXT` trong `Conversation.tsx`). Gemini báo key sai bằng 400 "API key not valid", không phải 401. SDK báo quá thời gian bằng `AbortError`, giống khi client huỷ, nên phân biệt bằng `req.signal.aborted`.
+  - Hội thoại không được lưu ở server: client gửi kèm lịch sử (chỉ chữ) mỗi lần gọi, server cắt còn `MAX_TURNS` lượt gần nhất.
+  - Route chưa có xác thực hay giới hạn lượt gọi. Trước khi deploy công khai phải thêm, nếu không ai cũng có thể tiêu tín dụng Gemini của chủ key.
 - **Lưu trữ:** kịch bản và cài đặt nằm trong `localStorage`. Không có database và tài khoản.
-- Không tự thêm backend, API key, dịch vụ STT/TTS bên ngoài hay thư viện nặng nếu chưa được yêu cầu.
+- Không tự thêm backend mới, API key, dịch vụ STT/TTS bên ngoài hay thư viện nặng nếu chưa được yêu cầu. Không đổi nhà cung cấp AI (đang là Gemini, theo lựa chọn của chủ dự án) khi chưa hỏi.
 
 ### Cấu trúc thư mục
 
@@ -37,7 +49,12 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/app/layout.tsx`: font Montserrat (có subset `vietnamese`, biến font gắn trên `<html>`), `ThemeProvider` (next-themes), `TooltipProvider`, khung sidebar (`SidebarProvider` + `AppSidebar` + `SidebarInset` + `AppHeader`), `Toaster`.
 - `src/app/page.tsx`: trang chủ, liệt kê các chế độ dạng thẻ.
 - `src/app/script/page.tsx`: route `/script`, chỉ khai báo metadata và render `ScriptPractice`.
-- `src/app/chat/page.tsx`: route `/chat`, trang "sắp ra mắt" của trò chuyện tự nhiên.
+- `src/app/chat/page.tsx`: route `/chat` (`dynamic = "force-dynamic"` để kiểm tra key lúc chạy, không phải lúc build), render `ChatPractice`.
+- `src/app/api/chat/reply/route.ts`, `src/app/api/chat/feedback/route.ts`: hai route gọi Gemini (xem mục Kiến trúc).
+- `src/lib/chat/prompts.ts`: logic thuần của chế độ trò chuyện. Gồm `TOPICS`, `LEVELS`, prompt (`buildReplySystemPrompt`, `buildFeedbackSystemPrompt`, `START_INSTRUCTION`), `FEEDBACK_SCHEMA`, `parseFeedback`, `sanitizeHistory`.
+- `src/lib/chat/gemini.server.ts`: **chỉ dùng ở server** (đọc `GEMINI_API_KEY`). Tạo client, `GEMINI_MODEL`, đổi lỗi SDK thành mã lỗi. Không import từ client component.
+- `src/components/chat/ChatPractice.tsx`: màn hình chọn chủ đề, trình độ, giọng, tốc độ, và màn hình hướng dẫn khi thiếu key.
+- `src/components/chat/Conversation.tsx`: phiên trò chuyện. Là máy trạng thái `thinking → speaking → listening → waiting/…`, dùng `tokenRef` như `Practice.tsx`, và huỷ thêm cả request đang chạy (`AbortController`) khi ngắt. Góp ý được lấy song song và không bị huỷ khi hội thoại chạy tiếp.
 - `src/app/globals.css`: Tailwind v4 và theme token của shadcn (màu chủ đạo indigo, thêm token `success`, bộ token `--sidebar-*`), sáng/tối theo class `.dark`.
 - `src/components/layout/`: `AppSidebar` (menu, tự đóng sau khi chọn trên mobile), `AppHeader` (nút mở menu, breadcrumb, `ThemeToggle`), `ThemeToggle`.
 - `src/components/script/ScriptPractice.tsx`: giữ state của chế độ kịch bản, chuyển giữa soạn (`edit`) và luyện (`practice`), lưu dữ liệu.
@@ -47,11 +64,12 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 
 ### Khoá localStorage
 
-| Khoá                  | Nội dung                                              |
-| --------------------- | ----------------------------------------------------- |
-| `scripttalk.draft`    | `{ raw, currentId }`: kịch bản đang soạn              |
-| `scripttalk.settings` | `Settings`: được merge với `DEFAULT_SETTINGS` khi đọc |
-| `scripttalk.saved`    | `SavedScript[]`: các kịch bản đã lưu                  |
+| Khoá                       | Nội dung                                                              |
+| -------------------------- | --------------------------------------------------------------------- |
+| `scripttalk.draft`         | `{ raw, currentId }`: kịch bản đang soạn                              |
+| `scripttalk.settings`      | `Settings`: được merge với `DEFAULT_SETTINGS` khi đọc                 |
+| `scripttalk.saved`         | `SavedScript[]`: các kịch bản đã lưu                                  |
+| `scripttalk.chat.settings` | `ChatSettings`: chủ đề, trình độ, giọng, tốc độ của chế độ trò chuyện |
 
 ## Định dạng kịch bản (hợp đồng với người dùng, giữ ổn định)
 

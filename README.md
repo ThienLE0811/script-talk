@@ -2,10 +2,10 @@
 
 Ứng dụng web luyện nói tiếng Anh, gồm nhiều chế độ luyện tập chọn từ menu bên trái:
 
-| Chế độ | Đường dẫn | Trạng thái |
-| --- | --- | --- |
-| Luyện theo kịch bản: máy đọc các vai còn lại, bạn nói vai của mình và được chấm điểm từng từ | `/script` | Đã có |
-| Trò chuyện tự nhiên: nói chuyện tự do theo chủ đề, không cần kịch bản | `/chat` | Sắp ra mắt |
+| Chế độ | Đường dẫn |
+| --- | --- |
+| Luyện theo kịch bản: máy đọc các vai còn lại, bạn nói vai của mình và được chấm điểm từng từ | `/script` |
+| Trò chuyện tự nhiên: nói chuyện tự do với AI theo chủ đề, được góp ý ngữ pháp sau mỗi câu | `/chat` |
 
 ## Chạy
 
@@ -15,6 +15,21 @@ npm run dev
 ```
 
 Mở http://localhost:3000 bằng **Chrome hoặc Edge** (cần nhận giọng nói) và cho phép micro.
+
+### Cấu hình AI cho chế độ trò chuyện
+
+Chế độ trò chuyện dùng Gemini API của Google. Chế độ kịch bản không cần bước này.
+
+1. Tạo API key tại [Google AI Studio](https://aistudio.google.com/apikey). Nếu có gói Google AI Pro, kích hoạt tín dụng Google Cloud ở trang My Benefits và gắn vào project của key.
+2. Chép `.env.example` thành `.env.local` rồi điền key:
+
+   ```bash
+   GEMINI_API_KEY=key-của-bạn
+   ```
+
+3. Khởi động lại `npm run dev`.
+
+`.env.local` đã nằm trong `.gitignore`, không bị commit. Key chỉ được đọc ở server.
 
 ## Luyện theo kịch bản
 
@@ -30,14 +45,16 @@ B: Hi, can I have a medium latte, please?
 
 ## Cách hoạt động
 
-- Không cần backend: dùng Web Speech API của trình duyệt (Text-to-Speech + Speech Recognition).
-- Speech Recognition của Chrome gửi âm thanh lên server Google nên cần Internet.
-- Kịch bản và cài đặt được lưu trong `localStorage` của trình duyệt.
+- Giọng nói xử lý ngay trên trình duyệt bằng Web Speech API (Text-to-Speech + Speech Recognition). Speech Recognition của Chrome gửi âm thanh lên server Google nên cần Internet.
+- Chế độ kịch bản chạy hoàn toàn trên trình duyệt.
+- Chế độ trò chuyện gửi câu chữ (không gửi âm thanh) tới hai API route của Next.js (`/api/chat/reply`, `/api/chat/feedback`). Hai route này gọi Gemini; câu trả lời được truyền về từng phần rồi đọc to.
+- Kịch bản và cài đặt được lưu trong `localStorage` của trình duyệt. Cuộc trò chuyện không được lưu.
+- Các API route chưa có xác thực. Đừng deploy công khai khi chưa thêm bảo vệ, nếu không người khác có thể dùng hết tín dụng của key.
 
 ## Phím tắt khi luyện
 
-| Phím | Tác dụng |
-| --- | --- |
-| Space | Bật mic / dừng nói |
-| Enter | Sang câu tiếp |
-| Esc | Tạm dừng |
+| Phím | Kịch bản | Trò chuyện |
+| --- | --- | --- |
+| Space | Bật mic / dừng nói | Bật mic / dừng nói |
+| Enter | Sang câu tiếp | — |
+| Esc | Tạm dừng | Tạm dừng |
