@@ -43,6 +43,8 @@ B: Hi, can I have a medium latte, please?
 - `#` ở đầu dòng là tiêu đề. Một dòng không có `Tên:` sẽ được nối vào câu trước.
 - Ghi chú trong `(ngoặc)` hoặc `[ngoặc vuông]` không được đọc và không tính điểm.
 
+Kịch bản đã lưu nằm trong trình duyệt (`localStorage`), riêng theo từng trình duyệt và từng địa chỉ (kể cả khác cổng). Dùng nút **Xuất** ở mục "Đã lưu" để tải toàn bộ kịch bản về file `.json`, và **Nhập** để mở lại trên trình duyệt hoặc máy khác. Khi nhập: kịch bản đã có thì bỏ qua, cùng một kịch bản nhưng bản trong file mới hơn thì được cập nhật, còn lại được thêm vào.
+
 ## Cách hoạt động
 
 - Giọng nói xử lý ngay trên trình duyệt bằng Web Speech API (Text-to-Speech + Speech Recognition). Speech Recognition của Chrome gửi âm thanh lên server Google nên cần Internet.
