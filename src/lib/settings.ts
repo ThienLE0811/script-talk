@@ -1,3 +1,5 @@
+import { newScriptId } from "./backup";
+
 export type LineMode = "full" | "hint" | "hidden";
 
 export type Settings = {
@@ -57,4 +59,18 @@ export function saveJSON(key: string, value: unknown) {
   } catch {
     /* storage full or blocked: ignore */
   }
+}
+
+/** Add a script to the saved list from outside the script editor (e.g. the chat mode). */
+export function addSavedScript(title: string, raw: string): SavedScript {
+  const script: SavedScript = { id: newScriptId(), title, raw, updatedAt: Date.now() };
+  saveJSON(STORAGE_KEYS.saved, [script, ...loadArray<SavedScript>(STORAGE_KEYS.saved)]);
+  return script;
+}
+
+/** Make the script editor open `script` next time it mounts, with `myRole` as the learner's role. */
+export function queueScriptForPractice(script: SavedScript, myRole: string) {
+  saveJSON(STORAGE_KEYS.draft, { raw: script.raw, currentId: script.id } satisfies Draft);
+  const settings = loadJSON(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
+  saveJSON(STORAGE_KEYS.settings, { ...settings, myRoles: [myRole] });
 }

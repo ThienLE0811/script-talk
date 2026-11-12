@@ -13,20 +13,25 @@ import {
   TriangleAlertIcon,
   Volume2Icon,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { aiErrorText, AiRequestError, readAiError } from "@/lib/ai-errors";
+import { aiErrorText, AiRequestError, postJSON, readAiError } from "@/lib/ai-errors";
 import { LEVELS, TOPICS, CUSTOM_TOPIC_ID, type ChatRole, type ChatTurn, type Feedback } from "@/lib/chat/prompts";
+import { CHAT_SCRIPT_ME, chatToScript, type ChatSummary, type Correction } from "@/lib/chat/summary";
+import { addSavedScript, queueScriptForPractice, type SavedScript } from "@/lib/settings";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
 import { cn } from "@/lib/utils";
 import type { ChatSettings } from "./ChatPractice";
+import SessionSummary, { type SummaryState } from "./SessionSummary";
 
 type FeedbackState = { status: "loading" } | { status: "done"; data: Feedback } | { status: "error" };
 type UiTurn = { id: number; role: ChatRole; text: string; streaming?: boolean; feedback?: FeedbackState };
-type Phase = "thinking" | "speaking" | "listening" | "waiting" | "paused" | "error";
+type Phase = "thinking" | "speaking" | "listening" | "waiting" | "paused" | "error" | "summary";
 
 const toHistory = (turns: UiTurn[]): ChatTurn[] =>
   turns.filter((t) => !t.streaming && t.text).map((t) => ({ role: t.role, text: t.text }));
@@ -219,6 +224,87 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
     });
   };
 
+  /* ---------- End of session: summary + save as script ---------- */
+
+  const router = useRouter();
+  const [summary, setSummary] = useState<SummaryState>({ status: "loading" });
+  // Number of turns the summary / saved script were made from, so they refresh after "continue".
+  const summaryForRef = useRef(-1);
+  const summaryAbortRef = useRef<AbortController | null>(null);
+  const [savedScript, setSavedScript] = useState<{ script: SavedScript; turnCount: number } | null>(null);
+
+  const doneTurns = () => turnsRef.current.filter((t) => !t.streaming && t.text);
+  const correctionsOf = (list: UiTurn[]): Correction[] =>
+    list.flatMap((t) =>
+      t.role === "user" && t.feedback?.status === "done" && t.feedback.data.verdict !== "good"
+        ? [{ original: t.text, corrected: t.feedback.data.corrected, explanation: t.feedback.data.explanation }]
+        : [],
+    );
+
+  const fetchSummary = async () => {
+    const list = doneTurns();
+    summaryAbortRef.current?.abort();
+    const ac = new AbortController();
+    summaryAbortRef.current = ac;
+    summaryForRef.current = list.length;
+    setSummary({ status: "loading" });
+    try {
+      const data = await postJSON<ChatSummary>(
+        "/api/chat/summary",
+        { ...requestBase, history: toHistory(list), corrections: correctionsOf(list) },
+        ac.signal,
+      );
+      if (aliveRef.current && !ac.signal.aborted) setSummary({ status: "done", data });
+    } catch (err) {
+      if (ac.signal.aborted || !aliveRef.current) return;
+      summaryForRef.current = -1;
+      setSummary({ status: "error", code: err instanceof AiRequestError ? err.code : "network" });
+    }
+  };
+
+  const endSession = () => {
+    if (!turnsRef.current.some((t) => t.role === "user")) {
+      onExit(); // nothing said yet: nothing to summarise
+      return;
+    }
+    interrupt();
+    setPhase("summary");
+    window.scrollTo({ top: 0 });
+    if (summaryForRef.current !== doneTurns().length) void fetchSummary();
+  };
+
+  const continueChat = () => {
+    summaryAbortRef.current?.abort();
+    if (summary.status === "loading") summaryForRef.current = -1;
+    resume();
+  };
+
+  const saveAsScript = () => {
+    const list = doneTurns();
+    const corrected = new Map(correctionsOf(list).map((c) => [c.original, c.corrected]));
+    const title = `${topicLabel} · ${new Date().toLocaleDateString("vi-VN")}`;
+    const raw = chatToScript(
+      list.map((t) => ({ role: t.role, text: t.text, corrected: t.role === "user" ? corrected.get(t.text) : undefined })),
+      title,
+    );
+    const script = addSavedScript(title, raw);
+    setSavedScript({ script, turnCount: list.length });
+    toast.success("Đã lưu thành kịch bản", {
+      description: "Xem trong mục “Đã lưu” ở chế độ Luyện theo kịch bản.",
+      action: { label: "Luyện ngay", onClick: () => practiceScript(script) },
+    });
+  };
+
+  const practiceScript = (script: SavedScript) => {
+    queueScriptForPractice(script, CHAT_SCRIPT_ME);
+    router.push("/script");
+  };
+
+  const playOnce = (text: string) => {
+    stopSpeaking();
+    void speak(text, speechOpts);
+  };
+
   // Open the conversation on mount; stop everything on unmount.
   useEffect(() => {
     aliveRef.current = true;
@@ -231,12 +317,14 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
       tokenRef.current++;
       recRef.current?.abort();
       replyAbortRef.current?.abort();
+      summaryAbortRef.current?.abort();
       feedbacks.forEach((ac) => ac.abort());
       stopSpeaking();
     };
   }, []);
 
   useEffect(() => {
+    if (phase === "summary") return;
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
   }, [turns, interim, phase]);
 
@@ -248,7 +336,7 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
     if (e.code === "Space" && (phase === "listening" || phase === "waiting")) {
       e.preventDefault();
       toggleMic();
-    } else if (e.code === "Escape" && phase !== "paused") {
+    } else if (e.code === "Escape" && phase !== "paused" && phase !== "summary") {
       pause();
     }
   };
@@ -264,6 +352,28 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
       : (TOPICS.find((t) => t.id === settings.topicId)?.label ?? "Trò chuyện");
   const levelLabel = LEVELS.find((l) => l.id === settings.level)?.label;
 
+  if (phase === "summary") {
+    const list = turns.filter((t) => !t.streaming && t.text);
+    const userTurns = list.filter((t) => t.role === "user");
+    const corrections = correctionsOf(list);
+    const good = userTurns.filter((t) => t.feedback?.status === "done" && t.feedback.data.verdict === "good").length;
+    return (
+      <SessionSummary
+        topicLabel={topicLabel}
+        stats={{ userTurns: userTurns.length, good, needsWork: corrections.length }}
+        corrections={corrections}
+        summary={summary}
+        saved={savedScript?.turnCount === list.length}
+        onRetrySummary={() => void fetchSummary()}
+        onSaveScript={saveAsScript}
+        onPracticeScript={() => savedScript && practiceScript(savedScript.script)}
+        onContinue={continueChat}
+        onNewSession={onExit}
+        onPlay={playOnce}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pt-4">
@@ -272,7 +382,7 @@ export default function Conversation({ settings, voiceURI, recSupported, onExit 
             <p className="truncate text-sm font-medium">{topicLabel}</p>
             {levelLabel && <p className="text-xs text-muted-foreground">{levelLabel}</p>}
           </div>
-          <Button variant="outline" size="sm" onClick={onExit}>
+          <Button variant="outline" size="sm" onClick={endSession}>
             <LogOutIcon /> Kết thúc
           </Button>
         </div>
