@@ -5,6 +5,7 @@ import {
   FilePlusIcon,
   PlayIcon,
   SaveIcon,
+  SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UploadIcon,
@@ -52,6 +53,7 @@ type Props = {
   onDelete: (id: string) => void;
   onNew: () => void;
   onStart: () => void;
+  onOpenGenerate: () => void;
   recSupported: boolean | null;
 };
 
@@ -76,7 +78,10 @@ export default function Editor(p: Props) {
           <Label htmlFor="script" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
             Kịch bản
           </Label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={p.onOpenGenerate} className="text-primary">
+              <SparklesIcon /> AI viết
+            </Button>
             <Button variant="outline" size="sm" onClick={p.onNew}>
               <FilePlusIcon /> Mới
             </Button>

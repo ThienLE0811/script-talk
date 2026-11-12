@@ -28,6 +28,7 @@ export const STORAGE_KEYS = {
   settings: "scripttalk.settings",
   saved: "scripttalk.saved",
   chatSettings: "scripttalk.chat.settings",
+  generate: "scripttalk.generate",
 } as const;
 
 export type Draft = { raw: string; currentId: string | null };

@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import Editor from "./Editor";
+import GenerateScriptDialog from "./GenerateScriptDialog";
 import Practice from "./Practice";
 import { backupFileName, buildBackup, MAX_IMPORT_BYTES, mergeScripts, newScriptId, parseBackup } from "@/lib/backup";
 import { parseScript, SAMPLE_SCRIPT } from "@/lib/script";
+import type { GeneratedScript } from "@/lib/generate-script";
 import {
   DEFAULT_SETTINGS,
   loadArray,
@@ -29,6 +31,7 @@ export default function ScriptPractice() {
   const [saved, setSaved] = useState<SavedScript[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [mode, setMode] = useState<"edit" | "practice">("edit");
+  const [generateOpen, setGenerateOpen] = useState(false);
   const [recSupported, setRecSupported] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
   const voices = useEnglishVoices();
@@ -141,6 +144,15 @@ export default function ScriptPractice() {
     window.scrollTo({ top: 0 });
   };
 
+  const onGenerated = (script: GeneratedScript) => {
+    setRaw(script.raw);
+    setCurrentId(null);
+    setSettings((s) => ({ ...s, myRoles: [script.learnerRole] }));
+    toast.success("AI đã viết xong kịch bản", {
+      description: `${script.title} · bạn đóng vai ${script.learnerRole}. Bấm “Lưu kịch bản” nếu muốn giữ lại.`,
+    });
+  };
+
 
   if (mode === "practice") {
     return (
@@ -191,7 +203,14 @@ export default function ScriptPractice() {
           setCurrentId(null);
         }}
         onStart={() => switchMode("practice")}
+        onOpenGenerate={() => setGenerateOpen(true)}
         recSupported={recSupported}
+      />
+      <GenerateScriptDialog
+        open={generateOpen}
+        onOpenChange={setGenerateOpen}
+        willReplace={raw.trim().length > 0 && raw !== SAMPLE_SCRIPT}
+        onGenerated={onGenerated}
       />
     </div>
   );
