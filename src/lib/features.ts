@@ -30,8 +30,8 @@ export const FEATURES: Feature[] = [
     title: "Trò chuyện tự nhiên",
     href: "/chat",
     icon: MessagesSquareIcon,
-    description: "Nói chuyện tự do theo chủ đề bạn chọn, không cần kịch bản soạn trước.",
-    status: "soon",
+    description: "Nói chuyện tự do với AI theo chủ đề bạn chọn, được góp ý ngữ pháp sau mỗi câu.",
+    status: "ready",
   },
 ];
 
