@@ -1,6 +1,11 @@
 # ScriptTalk
 
-Luyện hội thoại tiếng Anh theo kịch bản tự soạn: máy đọc các vai còn lại, bạn nói vai của mình và được chấm điểm từng từ.
+Ứng dụng web luyện nói tiếng Anh, gồm nhiều chế độ luyện tập chọn từ menu bên trái:
+
+| Chế độ | Đường dẫn | Trạng thái |
+| --- | --- | --- |
+| Luyện theo kịch bản: máy đọc các vai còn lại, bạn nói vai của mình và được chấm điểm từng từ | `/script` | Đã có |
+| Trò chuyện tự nhiên: nói chuyện tự do theo chủ đề, không cần kịch bản | `/chat` | Sắp ra mắt |
 
 ## Chạy
 
@@ -11,7 +16,7 @@ npm run dev
 
 Mở http://localhost:3000 bằng **Chrome hoặc Edge** (cần nhận giọng nói) và cho phép micro.
 
-## Kịch bản
+## Luyện theo kịch bản
 
 ```
 # At the coffee shop

@@ -33,13 +33,17 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/lib/script.ts`: logic thuần, không phụ thuộc DOM. Gồm parser (`parseScript`), chấm điểm (`compareLine`, `normalizeSentence`), `cleanForSpeech` (bỏ ghi chú trước khi đọc), `hintText` (chế độ gợi ý) và `SAMPLE_SCRIPT`.
 - `src/lib/speech.ts`: bọc Web Speech API. `useEnglishVoices` (danh sách giọng tiếng Anh, giọng tốt xếp trước), `speak` / `stopSpeaking`, `startListening` (tự dừng sau ~1,6 giây im lặng hoặc tối đa 25 giây), `isRecognitionSupported`.
 - `src/lib/settings.ts`: kiểu `Settings`, `SavedScript`, giá trị mặc định và các hàm đọc/ghi `localStorage` có `try/catch`.
-- `src/app/page.tsx`: trang duy nhất. Giữ state, chuyển giữa chế độ soạn (`edit`) và luyện (`practice`), lưu dữ liệu.
-- `src/app/layout.tsx`: font Montserrat (có subset `vietnamese`), `ThemeProvider` (next-themes), `TooltipProvider`, `Toaster`.
-- `src/app/globals.css`: Tailwind v4 và theme token của shadcn (màu chủ đạo indigo, thêm token `success`), sáng/tối theo class `.dark`.
-- `src/components/Editor.tsx`: ô soạn kịch bản, danh sách kịch bản đã lưu và bảng cài đặt (vai, giọng, tốc độ, chế độ hiển thị, điểm đạt).
-- `src/components/Practice.tsx`: màn hình hội thoại. Là máy trạng thái `speaking → listening → result/waiting → …`, dùng `tokenRef` để huỷ callback cũ khi người dùng bỏ qua, tạm dừng hoặc nghe lại. Phím tắt cũng nằm ở đây.
-- `src/components/ThemeToggle.tsx`: nút chuyển sáng/tối.
-- `src/components/ui/`: component sinh ra từ shadcn. Hạn chế sửa tay.
+- `src/lib/features.ts`: danh sách các chế độ luyện tập (`FEATURES`). Sidebar, trang chủ và breadcrumb đều đọc từ đây. Thêm chế độ mới = thêm một mục ở đây (`status: "ready" | "soon"`) và tạo route `src/app/<href>/page.tsx`.
+- `src/app/layout.tsx`: font Montserrat (có subset `vietnamese`, biến font gắn trên `<html>`), `ThemeProvider` (next-themes), `TooltipProvider`, khung sidebar (`SidebarProvider` + `AppSidebar` + `SidebarInset` + `AppHeader`), `Toaster`.
+- `src/app/page.tsx`: trang chủ, liệt kê các chế độ dạng thẻ.
+- `src/app/script/page.tsx`: route `/script`, chỉ khai báo metadata và render `ScriptPractice`.
+- `src/app/chat/page.tsx`: route `/chat`, trang "sắp ra mắt" của trò chuyện tự nhiên.
+- `src/app/globals.css`: Tailwind v4 và theme token của shadcn (màu chủ đạo indigo, thêm token `success`, bộ token `--sidebar-*`), sáng/tối theo class `.dark`.
+- `src/components/layout/`: `AppSidebar` (menu, tự đóng sau khi chọn trên mobile), `AppHeader` (nút mở menu, breadcrumb, `ThemeToggle`), `ThemeToggle`.
+- `src/components/script/ScriptPractice.tsx`: giữ state của chế độ kịch bản, chuyển giữa soạn (`edit`) và luyện (`practice`), lưu dữ liệu.
+- `src/components/script/Editor.tsx`: ô soạn kịch bản, danh sách kịch bản đã lưu và bảng cài đặt (vai, giọng, tốc độ, chế độ hiển thị, điểm đạt).
+- `src/components/script/Practice.tsx`: màn hình hội thoại. Là máy trạng thái `speaking → listening → result/waiting → …`, dùng `tokenRef` để huỷ callback cũ khi người dùng bỏ qua, tạm dừng hoặc nghe lại. Phím tắt cũng nằm ở đây. Thanh điều khiển là `sticky bottom-0` (không dùng `fixed`, vì sẽ đè lên sidebar).
+- `src/components/ui/`, `src/hooks/use-mobile.ts`: sinh ra từ shadcn. Hạn chế sửa tay.
 
 ### Khoá localStorage
 
