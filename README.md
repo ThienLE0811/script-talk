@@ -25,9 +25,34 @@ npm run dev
 
 Mở http://localhost:3000 bằng **Chrome hoặc Edge** (cần nhận giọng nói) và cho phép micro.
 
+Mọi cấu hình nằm trong `.env.local` (chép từ `.env.example`). File này đã nằm trong `.gitignore`. Sửa xong thì dev server tự nạp lại.
+
+### Mã truy cập (đăng nhập)
+
+Ứng dụng dành cho một người dùng: ai muốn vào phải nhập đúng mã ở trang `/login`.
+
+- `APP_ACCESS_CODE`: mã truy cập. Nên là một cụm dài, khó đoán.
+- Ở máy cá nhân có thể để trống để bỏ qua màn hình đăng nhập khi phát triển.
+- **Trên production (Vercel), thiếu biến này thì toàn bộ trang bị khoá**, để không bao giờ lỡ mở công khai.
+- Đổi mã thì mọi thiết bị đang đăng nhập sẽ bị đăng xuất.
+
+### Cơ sở dữ liệu (MongoDB)
+
+Kịch bản đã lưu nằm trong MongoDB, nên dùng chung được giữa máy tính, điện thoại, localhost và Vercel.
+
+1. Tạo tài khoản [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) và một cluster **M0 (miễn phí)**. Nên chọn region gần Vercel, ví dụ Singapore.
+2. Tạo database user, rồi mục **Network Access** cho phép `0.0.0.0/0` (Vercel không có IP cố định).
+3. Lấy connection string (`mongodb+srv://…`) rồi đặt vào `MONGODB_URI`. Hoặc dùng tích hợp MongoDB Atlas trong Vercel Marketplace để biến này được điền tự động.
+
+Kịch bản đã lưu trong trình duyệt từ trước khi có database sẽ hiện thông báo **"Chuyển lên server"** ở mục "Đã lưu". Bấm một lần là xong.
+
+### Deploy lên Vercel
+
+Đặt các biến `APP_ACCESS_CODE`, `MONGODB_URI`, `GEMINI_API_KEY` trong **Project Settings → Environment Variables**, rồi deploy lại.
+
 ### Cấu hình AI cho chế độ trò chuyện
 
-Chế độ trò chuyện dùng Gemini API của Google. Chế độ kịch bản không cần bước này.
+Chế độ trò chuyện, góp ý, tổng kết và nút "AI viết" dùng Gemini API của Google. Luyện kịch bản tự soạn không cần bước này.
 
 1. Tạo API key tại [Google AI Studio](https://aistudio.google.com/apikey). Nếu có gói Google AI Pro, kích hoạt tín dụng Google Cloud ở trang My Benefits và gắn vào project của key.
 2. Chép `.env.example` thành `.env.local` rồi điền key:
@@ -52,15 +77,15 @@ B: Hi, can I have a medium latte, please?
 - `#` ở đầu dòng là tiêu đề. Một dòng không có `Tên:` sẽ được nối vào câu trước.
 - Ghi chú trong `(ngoặc)` hoặc `[ngoặc vuông]` không được đọc và không tính điểm.
 
-Kịch bản đã lưu nằm trong trình duyệt (`localStorage`), riêng theo từng trình duyệt và từng địa chỉ (kể cả khác cổng). Dùng nút **Xuất** ở mục "Đã lưu" để tải toàn bộ kịch bản về file `.json`, và **Nhập** để mở lại trên trình duyệt hoặc máy khác. Khi nhập: kịch bản đã có thì bỏ qua, cùng một kịch bản nhưng bản trong file mới hơn thì được cập nhật, còn lại được thêm vào.
+Kịch bản đã lưu nằm trên server (MongoDB). Nút **Xuất** ở mục "Đã lưu" tải toàn bộ kịch bản về file `.json` để sao lưu, còn **Nhập** đưa file đó trở lại. Khi nhập: kịch bản đã có thì bỏ qua, cùng một kịch bản nhưng bản trong file mới hơn thì được cập nhật, còn lại được thêm vào; không bao giờ xoá.
 
 ## Cách hoạt động
 
 - Giọng nói xử lý ngay trên trình duyệt bằng Web Speech API (Text-to-Speech + Speech Recognition). Speech Recognition của Chrome gửi âm thanh lên server Google nên cần Internet.
-- Chế độ kịch bản chạy hoàn toàn trên trình duyệt.
-- Chế độ trò chuyện gửi câu chữ (không gửi âm thanh) tới hai API route của Next.js (`/api/chat/reply`, `/api/chat/feedback`). Hai route này gọi Gemini; câu trả lời được truyền về từng phần rồi đọc to.
-- Kịch bản và cài đặt được lưu trong `localStorage` của trình duyệt. Cuộc trò chuyện không được lưu.
-- Các API route chưa có xác thực. Đừng deploy công khai khi chưa thêm bảo vệ, nếu không người khác có thể dùng hết tín dụng của key.
+- Luyện và chấm điểm kịch bản chạy ngay trên trình duyệt.
+- Backend là các API route của Next.js: `/api/scripts/*` đọc/ghi MongoDB, còn `/api/chat/*` và `/api/script/generate` gọi Gemini. Chỉ có câu chữ đi qua server, không có âm thanh.
+- Mọi trang và API đều cần đăng nhập bằng mã truy cập (middleware), nên người khác có link cũng không đọc được dữ liệu hay dùng lượt Gemini của bạn.
+- Bản nháp đang soạn và cài đặt (vai, giọng, tốc độ…) lưu trong `localStorage` vì gắn với từng thiết bị. Cuộc trò chuyện chưa được lưu (trừ khi bấm "Lưu thành kịch bản").
 
 ## Phím tắt khi luyện
 

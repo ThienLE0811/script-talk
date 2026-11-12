@@ -18,6 +18,15 @@ npx tsc --noEmit   # chỉ kiểm tra type, nhanh hơn build
 
 Chưa có unit test. `next build` và `next dev` dùng chung thư mục `.next`, nên cần dừng dev server trước khi build.
 
+Biến môi trường (mẫu đầy đủ ở `.env.example`; trên Vercel đặt trong Environment Variables):
+
+| Biến | Dùng cho | Thiếu thì sao |
+| --- | --- | --- |
+| `APP_ACCESS_CODE` | Mã nhập ở `/login` | Dev: không khoá. Production: khoá toàn bộ (fail closed) |
+| `AUTH_SECRET` | Khoá ký cookie phiên (tuỳ chọn) | Dùng `APP_ACCESS_CODE` |
+| `MONGODB_URI`, `MONGODB_DB` | Lưu kịch bản (MongoDB Atlas) | Mục "Đã lưu" báo `db_not_configured`, không lưu được |
+| `GEMINI_API_KEY` | AI trò chuyện, góp ý, tổng kết, viết kịch bản | Các tính năng AI báo `missing_key` |
+
 Chế độ trò chuyện cần `GEMINI_API_KEY` trong `.env.local` (mẫu ở `.env.example`). Tuỳ chọn thêm `GEMINI_MODEL` (mặc định `gemini-3.6-flash`) và `GEMINI_FALLBACK_MODEL` (mặc định `gemini-3.5-flash-lite`). Dev server tự nạp lại `.env.local` khi file thay đổi ("Reload env"). Không có key thì `/chat` hiện hướng dẫn cấu hình, chế độ kịch bản vẫn chạy bình thường.
 
 Thêm component shadcn/ui bằng `npx shadcn@latest add <tên>` (cấu hình trong `components.json`, style `radix-nova`). Các component trong `src/components/ui/` import `cn` từ package `cn` của shadcn, đây là bình thường.
@@ -30,34 +39,45 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
   - `speechSynthesis` (TTS): đọc câu của vai máy hoặc của AI.
   - `SpeechRecognition` / `webkitSpeechRecognition`: nhận câu người dùng nói.
 - Speech Recognition của Chrome gửi âm thanh lên server Google nên **cần Internet**. Không có mạng thì lỗi `network`, cần báo lỗi rõ cho người dùng.
-- **Backend chỉ gồm các route handler gọi Gemini** bằng SDK `@google/genai` (`ai.models.generateContent` / `generateContentStream`). Chỉ có chữ đi qua server, không có âm thanh.
+- **Đăng nhập (một người dùng, mã truy cập):** `src/middleware.ts` chặn mọi trang và API trừ `/login` và `/api/auth/*`. Trang chưa đăng nhập thì chuyển sang `/login?next=…`, API thì trả 401 `{ error: "unauthorized" }` (client tự chuyển sang `/login`). Cookie `st_session` = `<hạn>.<HMAC>` (Web Crypto, chạy được cả ở Edge), `HttpOnly`, 180 ngày. Đổi `APP_ACCESS_CODE` thì mọi phiên cũ mất hiệu lực (nếu không đặt `AUTH_SECRET`). Đăng nhập sai bị trễ 0,8 giây. `safeNextPath` dùng bộ phân tích URL để chặn chuyển hướng ra trang khác (`//evil`, `/\evil`, `/<tab>/evil`).
+- **Cơ sở dữ liệu: MongoDB** (driver `mongodb`), hiện chỉ có collection `scripts` (`_id` là id kịch bản dạng chuỗi, `title`, `raw`, `createdAt`, `updatedAt` dạng số ms). Kết nối cache trên `globalThis` (dev hot-reload và Vercel tái dùng). Chưa có `userId` vì chỉ có một người dùng.
+  - `GET/POST /api/scripts`, `PUT/DELETE /api/scripts/[id]`, `POST /api/scripts/import` (nhận file Xuất hoặc `{ scripts }`, gộp bằng `mergeScripts`, không bao giờ xoá).
+  - Lỗi: `db_not_configured` (503), `db_error` (503), `not_found` (404), `bad_request` (400).
+- **Route gọi Gemini** bằng SDK `@google/genai` (`ai.models.generateContent` / `generateContentStream`). Chỉ có chữ đi qua server, không có âm thanh.
   - `POST /api/chat/reply`: nhận `{ topicId, customTopic?, level, history }`, stream câu trả lời dạng `text/plain`.
   - `POST /api/chat/feedback`: nhận `{ level, history, utterance }`, trả JSON `Feedback` (`verdict`, `corrected`, `explanation`) qua `responseJsonSchema`.
   - `POST /api/chat/summary`: nhận `{ topicId, customTopic?, level, history, corrections }`, trả JSON `ChatSummary` (`overall`, `strengths`, `focus`, `phrases`; giải thích bằng tiếng Việt).
   - `POST /api/script/generate`: nhận `{ topic, level, length }`, trả `GeneratedScript` (`raw` đã đúng cú pháp kịch bản, `learnerRole`, `partnerRole`). Model trả JSON theo schema, server tự ghép thành text và làm sạch tên vai (chỉ chữ cái và khoảng trắng) để parser không hiểu sai.
   - Mọi lời gọi đi qua `withModelFallback`: thử `GEMINI_MODEL` trước, gặp 503 (quá tải), 429 (hết lượt, quota gói miễn phí tính riêng theo model), 500 hoặc quá `REQUEST_TIMEOUT_MS` (20 giây) thì chuyển sang model dự phòng. Request bị client huỷ thì dừng ngay. Model mới ra (ví dụ `gemini-3.8-flash`) từng trả 503 "high demand" liên tục, nên mặc định dùng bản Stable.
-  - Lỗi trả về `{ error: code }` với `code` thuộc `missing_key | invalid_key | rate_limited | overloaded | timeout | bad_request | upstream_error`; client đổi mã này thành thông báo tiếng Việt (`ERROR_TEXT` trong `Conversation.tsx`). Gemini báo key sai bằng 400 "API key not valid", không phải 401. SDK báo quá thời gian bằng `AbortError`, giống khi client huỷ, nên phân biệt bằng `req.signal.aborted`.
+  - Lỗi trả về `{ error: code }` với `code` thuộc `missing_key | invalid_key | rate_limited | overloaded | timeout | bad_request | upstream_error`; client đổi mã này thành thông báo tiếng Việt (`aiErrorText` trong `src/lib/ai-errors.ts`, dùng chung cho cả mã lỗi DB và đăng nhập). Gemini báo key sai bằng 400 "API key not valid", không phải 401. SDK báo quá thời gian bằng `AbortError`, giống khi client huỷ, nên phân biệt bằng `req.signal.aborted`.
   - Hội thoại không được lưu ở server: client gửi kèm lịch sử (chỉ chữ) mỗi lần gọi, server cắt còn `MAX_TURNS` lượt gần nhất.
-  - Route chưa có xác thực hay giới hạn lượt gọi. Trước khi deploy công khai phải thêm, nếu không ai cũng có thể tiêu tín dụng Gemini của chủ key.
-- **Lưu trữ:** kịch bản và cài đặt nằm trong `localStorage`. Không có database và tài khoản.
-- Không tự thêm backend mới, API key, dịch vụ STT/TTS bên ngoài hay thư viện nặng nếu chưa được yêu cầu. Không đổi nhà cung cấp AI (đang là Gemini, theo lựa chọn của chủ dự án) khi chưa hỏi.
+  - Các route AI được middleware bảo vệ như mọi API khác, nhưng chưa có giới hạn lượt gọi.
+- **Lưu trữ:** kịch bản đã lưu nằm trong MongoDB. Bản nháp đang soạn và các cài đặt (vai, giọng, tốc độ…) vẫn ở `localStorage` vì gắn với từng thiết bị. Kịch bản cũ trong `localStorage` (`scripttalk.saved`) được chuyển lên server bằng nút "Chuyển lên server" rồi xoá khỏi trình duyệt.
+- Không tự thêm backend mới, database/collection mới, API key, dịch vụ STT/TTS bên ngoài hay thư viện nặng nếu chưa được yêu cầu. Không đổi nhà cung cấp AI (đang là Gemini, theo lựa chọn của chủ dự án) khi chưa hỏi.
 
 ### Cấu trúc thư mục
 
 - `src/lib/script.ts`: logic thuần, không phụ thuộc DOM. Gồm parser (`parseScript`), chấm điểm (`compareLine`, `normalizeSentence`), `cleanForSpeech` (bỏ ghi chú trước khi đọc), `hintText` (chế độ gợi ý) và `SAMPLE_SCRIPT`.
 - `src/lib/speech.ts`: bọc Web Speech API. `useEnglishVoices` (danh sách giọng tiếng Anh, giọng tốt xếp trước), `speak` / `stopSpeaking`, `startListening` (tự dừng sau ~1,6 giây im lặng hoặc tối đa 25 giây), `isRecognitionSupported`.
 - `src/lib/settings.ts`: kiểu `Settings`, `SavedScript`, giá trị mặc định và các hàm đọc/ghi `localStorage` có `try/catch`.
-- `src/lib/settings.ts` cũng chứa `STORAGE_KEYS` (mọi khoá `localStorage`), `addSavedScript` và `queueScriptForPractice` (ghi draft và vai để `/script` mở sẵn kịch bản, dùng khi lưu từ chế độ trò chuyện).
-- `src/lib/ai-errors.ts`: thông báo tiếng Việt cho mã lỗi của các route AI (`aiErrorText`), `postJSON`, `readAiError`, `AiRequestError`. Dùng chung cho mọi component gọi AI.
+- `src/lib/settings.ts` cũng chứa `STORAGE_KEYS` (mọi khoá `localStorage`) và `queueScriptForPractice` (ghi draft và vai để `/script` mở sẵn kịch bản, dùng khi lưu từ chế độ trò chuyện).
+- `src/lib/ai-errors.ts`: gọi API của chính app từ client (`requestJSON`, `postJSON`, `readAiError`, `AiRequestError`) và thông báo tiếng Việt cho mọi mã lỗi (`aiErrorText`: AI, DB, đăng nhập). Gặp 401 thì tự chuyển sang `/login`.
+- `src/lib/scripts-client.ts`: gọi `/api/scripts` từ client (`fetchScripts`, `createScript`, `updateScript`, `deleteScript`, `importScripts`).
+- `src/lib/auth/session.ts`: `authMode`, tạo/kiểm tra cookie phiên, `checkAccessCode` (so sánh thời gian hằng), `safeNextPath`. Không phụ thuộc Node, chạy được trong middleware.
+- `src/lib/db/mongo.server.ts`, `src/lib/db/scripts.server.ts`: **chỉ dùng ở server**. Kết nối MongoDB (`getDb`, null khi thiếu `MONGODB_URI`) và các thao tác trên collection `scripts`.
+- `src/middleware.ts`: bắt buộc đăng nhập (xem mục Kiến trúc).
+- `src/app/login/page.tsx`, `src/components/auth/LoginForm.tsx`: trang đăng nhập (nằm ngoài khung sidebar). `src/app/api/auth/login|logout/route.ts`: đặt/xoá cookie.
+- `src/app/api/scripts/**`: API kịch bản (xem mục Kiến trúc).
 - `src/lib/generate-script.ts`: logic thuần cho "AI viết kịch bản" (prompt, `GENERATE_SCHEMA`, `toGeneratedScript`, `cleanRoleName`, `SCRIPT_LENGTHS`, `TOPIC_SUGGESTIONS`).
 - `src/lib/practice.ts`: `failedLineIndexes` (câu của người học bị bỏ qua, chưa trả lời hoặc dưới điểm đạt) và `buildRetryScript` (kịch bản con gồm các câu đó, mỗi câu kèm câu của đối phương ngay trước).
 - `src/lib/chat/summary.ts`: logic thuần cho tổng kết (`SUMMARY_SCHEMA`, prompt, `parseSummary`) và `chatToScript` (vai `Partner` / `Me`).
 - `src/lib/backup.ts`: logic thuần cho nút Xuất / Nhập kịch bản ra file `.json`. Gồm `buildBackup`, `parseBackup` (nhận cả object `{ app: "scripttalk", type: "scripts", version, exportedAt, scripts }` lẫn mảng `[{ raw, title? }]` viết tay), `mergeScripts` (trùng id thì giữ bản sửa mới hơn, trùng nội dung thì bỏ qua) và `newScriptId`. Định dạng file là hợp đồng với người dùng: giữ tương thích ngược, tăng `BACKUP_VERSION` khi đổi cấu trúc.
-- `src/lib/features.ts`: danh sách các chế độ luyện tập (`FEATURES`). Sidebar, trang chủ và breadcrumb đều đọc từ đây. Thêm chế độ mới = thêm một mục ở đây (`status: "ready" | "soon"`) và tạo route `src/app/<href>/page.tsx`.
-- `src/app/layout.tsx`: font Montserrat (có subset `vietnamese`, biến font gắn trên `<html>`), `ThemeProvider` (next-themes), `TooltipProvider`, khung sidebar (`SidebarProvider` + `AppSidebar` + `SidebarInset` + `AppHeader`), `Toaster`.
-- `src/app/page.tsx`: trang chủ, liệt kê các chế độ dạng thẻ.
-- `src/app/script/page.tsx`: route `/script`, chỉ khai báo metadata và render `ScriptPractice`.
-- `src/app/chat/page.tsx`: route `/chat` (`dynamic = "force-dynamic"` để kiểm tra key lúc chạy, không phải lúc build), render `ChatPractice`.
+- `src/lib/features.ts`: danh sách các chế độ luyện tập (`FEATURES`). Sidebar, trang chủ và breadcrumb đều đọc từ đây. Thêm chế độ mới = thêm một mục ở đây (`status: "ready" | "soon"`) và tạo route `src/app/(app)/<href>/page.tsx`.
+- `src/app/layout.tsx`: font Montserrat (có subset `vietnamese`, biến font gắn trên `<html>`), `ThemeProvider` (next-themes), `TooltipProvider`, `Toaster`.
+- `src/app/(app)/layout.tsx`: khung của mọi trang sau đăng nhập (`SidebarProvider` + `AppSidebar` + `SidebarInset` + `AppHeader`). Route group `(app)` không đổi URL.
+- `src/app/(app)/page.tsx`: trang chủ, liệt kê các chế độ dạng thẻ.
+- `src/app/(app)/script/page.tsx`: route `/script`, chỉ khai báo metadata và render `ScriptPractice`.
+- `src/app/(app)/chat/page.tsx`: route `/chat` (`dynamic = "force-dynamic"` để kiểm tra key lúc chạy, không phải lúc build), render `ChatPractice`.
 - `src/app/api/chat/reply/route.ts`, `src/app/api/chat/feedback/route.ts`: hai route gọi Gemini (xem mục Kiến trúc).
 - `src/lib/chat/prompts.ts`: logic thuần của chế độ trò chuyện. Gồm `TOPICS`, `LEVELS`, prompt (`buildReplySystemPrompt`, `buildFeedbackSystemPrompt`, `START_INSTRUCTION`), `FEEDBACK_SCHEMA`, `parseFeedback`, `sanitizeHistory`.
 - `src/lib/chat/gemini.server.ts`: **chỉ dùng ở server** (đọc `GEMINI_API_KEY`). Tạo client, `GEMINI_MODEL`, đổi lỗi SDK thành mã lỗi. Không import từ client component.
@@ -66,8 +86,8 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 - `src/components/chat/ChatPractice.tsx`: màn hình chọn chủ đề, trình độ, giọng, tốc độ, và màn hình hướng dẫn khi thiếu key.
 - `src/components/chat/Conversation.tsx`: phiên trò chuyện. Là máy trạng thái `thinking → speaking → listening → waiting/…`, dùng `tokenRef` như `Practice.tsx`, và huỷ thêm cả request đang chạy (`AbortController`) khi ngắt. Góp ý được lấy song song và không bị huỷ khi hội thoại chạy tiếp.
 - `src/app/globals.css`: Tailwind v4 và theme token của shadcn (màu chủ đạo indigo, thêm token `success`, bộ token `--sidebar-*`), sáng/tối theo class `.dark`.
-- `src/components/layout/`: `AppSidebar` (menu, tự đóng sau khi chọn trên mobile), `AppHeader` (nút mở menu, breadcrumb, `ThemeToggle`), `ThemeToggle`.
-- `src/components/script/ScriptPractice.tsx`: giữ state của chế độ kịch bản, chuyển giữa soạn (`edit`) và luyện (`practice`), lưu dữ liệu.
+- `src/components/layout/`: `AppSidebar` (menu, tự đóng sau khi chọn trên mobile, nút "Đăng xuất" khi bật mã truy cập), `AppHeader` (nút mở menu, breadcrumb, `ThemeToggle`), `ThemeToggle`.
+- `src/components/script/ScriptPractice.tsx`: giữ state của chế độ kịch bản, chuyển giữa soạn (`edit`) và luyện (`practice`). Kịch bản đã lưu đọc/ghi qua `/api/scripts`; mỗi lần chỉ chạy một thao tác lưu/xoá/nhập (`busy`). Lưu một kịch bản đã bị xoá ở thiết bị khác thì tạo bản mới thay vì mất nội dung.
 - `src/components/script/Editor.tsx`: ô soạn kịch bản, danh sách kịch bản đã lưu và bảng cài đặt (vai, giọng, tốc độ, chế độ hiển thị, điểm đạt).
 - `src/components/script/Practice.tsx`: màn hình hội thoại. Là máy trạng thái `speaking → listening → result/waiting → …`, dùng `tokenRef` để huỷ callback cũ khi người dùng bỏ qua, tạm dừng hoặc nghe lại. Phím tắt cũng nằm ở đây. Thanh điều khiển là `sticky bottom-0` (không dùng `fixed`, vì sẽ đè lên sidebar).
 - `src/components/ui/`, `src/hooks/use-mobile.ts`: sinh ra từ shadcn. Hạn chế sửa tay.
@@ -78,7 +98,7 @@ Kiểm thử thủ công bằng **Chrome hoặc Edge** và cho phép micro. Fire
 | -------------------------- | --------------------------------------------------------------------- |
 | `scripttalk.draft`         | `{ raw, currentId }`: kịch bản đang soạn                              |
 | `scripttalk.settings`      | `Settings`: được merge với `DEFAULT_SETTINGS` khi đọc                 |
-| `scripttalk.saved`         | `SavedScript[]`: các kịch bản đã lưu                                  |
+| `scripttalk.saved`         | Cũ: kịch bản đã lưu trước khi có MongoDB                              |
 | `scripttalk.chat.settings` | `ChatSettings`: chủ đề, trình độ, giọng, tốc độ của chế độ trò chuyện |
 | `scripttalk.generate`      | `{ level, length }`: lựa chọn gần nhất trong hộp thoại "AI viết"      |
 
