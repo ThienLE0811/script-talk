@@ -5,6 +5,7 @@ import {
   BookmarkPlusIcon,
   CheckCircle2Icon,
   CheckIcon,
+  ChevronDownIcon,
   Loader2Icon,
   MessageCircleIcon,
   NotebookPenIcon,
@@ -19,8 +20,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { aiErrorText } from "@/lib/ai-errors";
+import type { Mission } from "@/lib/chat/mission";
+import type { ChatTurn } from "@/lib/chat/prompts";
 import type { ChatSummary, Correction } from "@/lib/chat/summary";
 import type { NewPhrase } from "@/lib/phrasebook";
+import { MissionCard } from "./MissionBar";
 
 export type SummaryState = { status: "loading" } | { status: "done"; data: ChatSummary } | { status: "error"; code: string };
 
@@ -28,6 +32,10 @@ type Props = {
   topicLabel: string;
   stats: { userTurns: number; good: number; needsWork: number };
   corrections: Correction[];
+  mission: Mission | null;
+  goalsDone: number[];
+  /** The whole conversation, shown collapsed. */
+  transcript: ChatTurn[];
   summary: SummaryState;
   /** True once this exact conversation has been saved as a script. */
   saved: boolean;
@@ -56,6 +64,8 @@ export default function SessionSummary(p: Props) {
         <Stat label="Câu tự nhiên" value={p.stats.good} tone="success" />
         <Stat label="Câu nên sửa" value={p.stats.needsWork} tone={p.stats.needsWork ? "warn" : undefined} />
       </div>
+
+      {p.mission && <MissionCard mission={p.mission} done={p.goalsDone} />}
 
       <Card>
         <CardHeader>
@@ -105,6 +115,8 @@ export default function SessionSummary(p: Props) {
           </CardContent>
         </Card>
       )}
+
+      <Transcript turns={p.transcript} onPlay={p.onPlay} />
 
       <Card className="bg-accent/40">
         <CardContent className="flex flex-col gap-3 text-sm">
@@ -207,6 +219,29 @@ function SummaryBody({
         </section>
       )}
     </>
+  );
+}
+
+function Transcript({ turns, onPlay }: { turns: ChatTurn[]; onPlay: (text: string) => void }) {
+  if (!turns.length) return null;
+  return (
+    <details className="group rounded-xl border bg-card">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        Xem lại lời thoại ({turns.length} lượt)
+        <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <ol className="flex flex-col gap-2 border-t px-4 py-3 text-sm">
+        {turns.map((t, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className="w-8 shrink-0 pt-0.5 text-xs font-medium text-muted-foreground">
+              {t.role === "assistant" ? "AI" : "Bạn"}
+            </span>
+            <p className="min-w-0 flex-1">{t.text}</p>
+            <PlayButton text={t.text} onPlay={onPlay} />
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 

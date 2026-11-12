@@ -2,17 +2,25 @@
 
 import { ExternalLinkIcon, KeyRoundIcon, MessagesSquareIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { aiErrorText, AiRequestError } from "@/lib/ai-errors";
+import { newScriptId } from "@/lib/backup";
+import type { ChatSession } from "@/lib/chat/history";
 import { CUSTOM_TOPIC_ID, LEVELS, MAX_CUSTOM_TOPIC_LENGTH, TOPICS, type LevelId } from "@/lib/chat/prompts";
+import { fetchChat } from "@/lib/chats-client";
 import { loadJSON, saveJSON } from "@/lib/settings";
 import { isRecognitionSupported, useEnglishVoices } from "@/lib/speech";
 import { cn } from "@/lib/utils";
 import Conversation from "./Conversation";
+import RecentChats from "./RecentChats";
 
 export type ChatSettings = {
   topicId: string;
@@ -20,6 +28,8 @@ export type ChatSettings = {
   level: LevelId;
   rate: number;
   voiceURI: string | null;
+  /** Start each conversation with a mission (concrete goals to reach). */
+  mission: boolean;
 };
 
 const K_CHAT_SETTINGS = "scripttalk.chat.settings";
@@ -29,6 +39,7 @@ const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   level: "intermediate",
   rate: 0.95,
   voiceURI: null,
+  mission: true,
 };
 
 /** The "natural conversation" mode: pick a topic, then talk freely with the AI. */
@@ -36,6 +47,9 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
   const [settings, setSettings] = useState<ChatSettings>(DEFAULT_CHAT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<"setup" | "chat">("setup");
+  // The conversation being shown: a new one, or a saved one reopened from the history.
+  const [session, setSession] = useState<{ id: string; initial?: ChatSession }>({ id: "" });
+  const [opening, setOpening] = useState<string | null>(null);
   const [recSupported, setRecSupported] = useState<boolean | null>(null);
   const voices = useEnglishVoices();
 
@@ -60,12 +74,41 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
     window.scrollTo({ top: 0 });
   };
 
+  const startNew = () => {
+    setSession({ id: newScriptId() });
+    switchMode("chat");
+  };
+
+  const openSaved = async (id: string) => {
+    setOpening(id);
+    try {
+      const initial = await fetchChat(id);
+      setSession({ id, initial });
+      switchMode("chat");
+    } catch (err) {
+      toast.error("Chưa mở được buổi trò chuyện", {
+        description: aiErrorText(err instanceof AiRequestError ? err.code : "network"),
+      });
+    } finally {
+      setOpening(null);
+    }
+  };
+
   if (!configured) return <MissingKey />;
 
   if (mode === "chat") {
+    const { initial } = session;
     return (
       <Conversation
-        settings={settings}
+        key={session.id}
+        sessionId={session.id}
+        initial={initial}
+        // A reopened conversation keeps its own topic and level; voice and speed follow the current settings.
+        settings={
+          initial
+            ? { ...settings, topicId: initial.topicId, customTopic: initial.customTopic ?? "", level: initial.level }
+            : settings
+        }
         voiceURI={voiceURI}
         recSupported={!!recSupported}
         onExit={() => switchMode("setup")}
@@ -179,17 +222,36 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
             </div>
           </CardContent>
           <CardFooter className="flex-col items-stretch gap-3">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="chat-mission"
+                checked={settings.mission}
+                onCheckedChange={(v) => set({ mission: v === true })}
+                className="mt-0.5"
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="chat-mission" className="font-normal">
+                  Nhận nhiệm vụ trong tình huống
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  AI giao 3 mục tiêu cụ thể (ví dụ: đặt phòng 2 đêm, hỏi có bữa sáng không, xin giảm giá) và đánh dấu
+                  khi bạn làm được.
+                </span>
+              </div>
+            </div>
             {recSupported === false && (
               <p className="flex gap-2 text-xs text-amber-700 dark:text-amber-300">
                 <TriangleAlertIcon className="size-4 shrink-0" />
                 Trình duyệt này không hỗ trợ nhận giọng nói, bạn sẽ phải gõ câu trả lời. Nên dùng Chrome hoặc Edge.
               </p>
             )}
-            <Button size="lg" disabled={!canStart} onClick={() => switchMode("chat")}>
+            <Button size="lg" disabled={!canStart} onClick={startNew}>
               <MessagesSquareIcon /> Bắt đầu trò chuyện
             </Button>
           </CardFooter>
         </Card>
+
+        <RecentChats opening={opening} onOpen={(id) => void openSaved(id)} />
       </div>
     </div>
   );

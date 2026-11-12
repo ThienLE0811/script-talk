@@ -126,17 +126,27 @@ export function buildFeedbackUserPrompt(history: ChatTurn[], utterance: string):
   return `Recent conversation (most recent last):\n${context || "(none)"}\n\nSentence to review: "${utterance}"`;
 }
 
-export const FEEDBACK_SCHEMA = {
-  type: "object",
-  properties: {
-    verdict: { type: "string", enum: ["good", "minor", "fix"] },
-    corrected: { type: "string" },
-    explanation: { type: "string" },
-  },
-  required: ["verdict", "corrected", "explanation"],
-} as const;
+/** JSON schema for feedback; with a mission it also asks which goals the sentence completed. */
+export function feedbackSchema(withGoals: boolean) {
+  return {
+    type: "object",
+    properties: {
+      verdict: { type: "string", enum: ["good", "minor", "fix"] },
+      corrected: { type: "string" },
+      explanation: { type: "string" },
+      ...(withGoals ? { goalsDone: { type: "array", items: { type: "integer" } } } : {}),
+    },
+    required: ["verdict", "corrected", "explanation", ...(withGoals ? ["goalsDone"] : [])],
+  };
+}
 
-export type Feedback = { verdict: "good" | "minor" | "fix"; corrected: string; explanation: string };
+export type Feedback = {
+  verdict: "good" | "minor" | "fix";
+  corrected: string;
+  explanation: string;
+  /** Mission goals (indexes) this sentence completed. Only present in a session with a mission. */
+  goalsDone?: number[];
+};
 
 export function parseFeedback(raw: string): Feedback | null {
   try {
@@ -147,7 +157,9 @@ export function parseFeedback(raw: string): Feedback | null {
       typeof v.corrected === "string" &&
       typeof v.explanation === "string"
     ) {
-      return { verdict: v.verdict, corrected: v.corrected.trim(), explanation: v.explanation.trim() };
+      const fb: Feedback = { verdict: v.verdict, corrected: v.corrected.trim(), explanation: v.explanation.trim() };
+      if (Array.isArray(v.goalsDone)) fb.goalsDone = v.goalsDone.filter((i: unknown) => Number.isInteger(i));
+      return fb;
     }
   } catch {
     /* fall through */

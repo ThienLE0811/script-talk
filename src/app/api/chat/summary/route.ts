@@ -6,6 +6,7 @@ import {
   toErrorResponse,
   withModelFallback,
 } from "@/lib/chat/gemini.server";
+import { missionSummaryNote, readGoalIndexes, readMission } from "@/lib/chat/mission";
 import { MAX_CUSTOM_TOPIC_LENGTH, MAX_TEXT_LENGTH, sanitizeHistory, scenarioFor } from "@/lib/chat/prompts";
 import {
   buildSummarySystemPrompt,
@@ -31,7 +32,7 @@ function sanitizeCorrections(input: unknown): Correction[] {
 }
 
 /**
- * POST { topicId, customTopic?, level, history, corrections }
+ * POST { topicId, customTopic?, level, history, corrections, mission?, goalsDone? }
  * Returns ChatSummary (Vietnamese feedback on the whole conversation) as JSON.
  */
 export async function POST(req: Request) {
@@ -44,13 +45,20 @@ export async function POST(req: Request) {
     return jsonError("bad_request", 400);
   }
   const customTopic = typeof body.customTopic === "string" ? body.customTopic.slice(0, MAX_CUSTOM_TOPIC_LENGTH) : "";
+  const mission = readMission(body.mission);
+  const missionNote = mission
+    ? missionSummaryNote(mission, readGoalIndexes(body.goalsDone, mission.goals.length))
+    : "";
 
   try {
     const res = await withModelFallback(req.signal, (model) =>
       ai.models.generateContent({
         model,
         contents: [
-          { role: "user", parts: [{ text: buildSummaryUserPrompt(history, sanitizeCorrections(body.corrections)) }] },
+          {
+            role: "user",
+            parts: [{ text: buildSummaryUserPrompt(history, sanitizeCorrections(body.corrections)) + missionNote }],
+          },
         ],
         config: {
           systemInstruction: buildSummarySystemPrompt(scenarioFor(body.topicId, customTopic), body.level),

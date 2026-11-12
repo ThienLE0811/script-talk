@@ -66,12 +66,15 @@ export function buildSummaryUserPrompt(history: ChatTurn[], corrections: Correct
 const str = (v: unknown, max = 400) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 export function parseSummary(raw: string): ChatSummary | null {
-  let v: unknown;
   try {
-    v = JSON.parse(raw);
+    return parseSummaryObject(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+/** Validate a summary object (from the model, or saved with a conversation). */
+export function parseSummaryObject(v: unknown): ChatSummary | null {
   if (!v || typeof v !== "object") return null;
   const d = v as Record<string, unknown>;
   const overall = str(d.overall, 600);
