@@ -1,0 +1,145 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Editor from "@/components/Editor";
+import Practice from "@/components/Practice";
+import ThemeToggle from "@/components/ThemeToggle";
+import { toast } from "sonner";
+import { parseScript, SAMPLE_SCRIPT } from "@/lib/script";
+import { DEFAULT_SETTINGS, loadArray, loadJSON, saveJSON, type SavedScript, type Settings } from "@/lib/settings";
+import { isRecognitionSupported, stopSpeaking, useEnglishVoices } from "@/lib/speech";
+
+const K_DRAFT = "scripttalk.draft";
+const K_SETTINGS = "scripttalk.settings";
+const K_SAVED = "scripttalk.saved";
+
+export default function Home() {
+  const [raw, setRaw] = useState(SAMPLE_SCRIPT);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [saved, setSaved] = useState<SavedScript[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [mode, setMode] = useState<"edit" | "practice">("edit");
+  const [recSupported, setRecSupported] = useState<boolean | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const voices = useEnglishVoices();
+
+  // Load persisted state after mount (localStorage is not available during SSR).
+  useEffect(() => {
+    const draft = loadJSON<{ raw: string; currentId: string | null }>(K_DRAFT, { raw: SAMPLE_SCRIPT, currentId: null });
+    setRaw(draft.raw);
+    setCurrentId(draft.currentId);
+    setSettings(loadJSON(K_SETTINGS, DEFAULT_SETTINGS));
+    setSaved(loadArray<SavedScript>(K_SAVED));
+    setRecSupported(isRecognitionSupported());
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (loaded) saveJSON(K_DRAFT, { raw, currentId });
+  }, [raw, currentId, loaded]);
+  useEffect(() => {
+    if (loaded) saveJSON(K_SETTINGS, settings);
+  }, [settings, loaded]);
+
+  const parsed = useMemo(() => parseScript(raw), [raw]);
+
+  const myRoles = useMemo(() => {
+    const valid = settings.myRoles.filter((r) => parsed.speakers.includes(r));
+    if (valid.length) return valid;
+    const fallback = parsed.speakers[1] ?? parsed.speakers[0];
+    return fallback ? [fallback] : [];
+  }, [settings.myRoles, parsed.speakers]);
+
+  // Pick a voice per machine speaker: the saved choice, or a different good voice for each.
+  const voiceFor = (speaker: string): string | undefined => {
+    const chosen = settings.voices[speaker];
+    if (chosen && voices.some((v) => v.voiceURI === chosen)) return chosen;
+    if (!voices.length) return undefined;
+    const machine = parsed.speakers.filter((s) => !myRoles.includes(s));
+    const k = Math.max(0, machine.indexOf(speaker));
+    return voices[k % voices.length].voiceURI;
+  };
+
+  const persistSaved = (list: SavedScript[]) => {
+    setSaved(list);
+    saveJSON(K_SAVED, list);
+  };
+
+  const onSave = () => {
+    const title = parsed.title || parsed.lines[0]?.text.slice(0, 40) || "Kịch bản";
+    const now = Date.now();
+    if (currentId && saved.some((s) => s.id === currentId)) {
+      persistSaved(
+        saved
+          .map((s) => (s.id === currentId ? { ...s, title, raw, updatedAt: now } : s))
+          .sort((a, b) => b.updatedAt - a.updatedAt),
+      );
+      toast.success("Đã lưu thay đổi", { description: title });
+    } else {
+      const id = now.toString(36);
+      persistSaved([{ id, title, raw, updatedAt: now }, ...saved]);
+      setCurrentId(id);
+      toast.success("Đã lưu kịch bản", { description: title });
+    }
+  };
+
+  return (
+    <main className="mx-auto min-h-screen w-full max-w-6xl px-4 py-6 sm:px-6">
+      {mode === "edit" && (
+        <header className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Script<span className="text-primary">Talk</span>
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Viết kịch bản, chọn vai của bạn. Máy đọc các vai còn lại, bạn nói phần của mình và được chấm từng từ.
+            </p>
+          </div>
+          <ThemeToggle />
+        </header>
+      )}
+
+      {mode === "edit" ? (
+        <Editor
+          raw={raw}
+          onRawChange={setRaw}
+          parsed={parsed}
+          myRoles={myRoles}
+          settings={settings}
+          onSettingsChange={setSettings}
+          voices={voices}
+          voiceFor={voiceFor}
+          saved={saved}
+          currentId={currentId}
+          onSave={onSave}
+          onLoad={(s) => {
+            setRaw(s.raw);
+            setCurrentId(s.id);
+          }}
+          onDelete={(id) => {
+            persistSaved(saved.filter((s) => s.id !== id));
+            if (id === currentId) setCurrentId(null);
+          }}
+          onNew={() => {
+            setRaw("# \nA: \nB: \n");
+            setCurrentId(null);
+          }}
+          onStart={() => setMode("practice")}
+          recSupported={recSupported}
+        />
+      ) : (
+        <Practice
+          script={parsed}
+          myRoles={myRoles}
+          settings={settings}
+          voiceFor={voiceFor}
+          recSupported={!!recSupported}
+          onExit={() => {
+            stopSpeaking();
+            setMode("edit");
+          }}
+        />
+      )}
+    </main>
+  );
+}
