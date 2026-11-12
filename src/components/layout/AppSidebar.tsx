@@ -1,11 +1,12 @@
 "use client";
 
-import { AudioLinesIcon, HouseIcon } from "lucide-react";
+import { AudioLinesIcon, HouseIcon, LogOutIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -19,8 +20,12 @@ import {
 } from "@/components/ui/sidebar";
 import { FEATURES } from "@/lib/features";
 
-export default function AppSidebar() {
+export default function AppSidebar({ canSignOut }: { canSignOut: boolean }) {
   const pathname = usePathname();
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    window.location.assign("/login");
+  };
   const { isMobile, setOpenMobile } = useSidebar();
   // On mobile the sidebar is a sheet: close it after navigating.
   const closeOnMobile = () => {
@@ -91,6 +96,18 @@ export default function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      {canSignOut && (
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Đăng xuất" onClick={signOut}>
+                <LogOutIcon />
+                <span>Đăng xuất</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      )}
       <SidebarRail />
     </Sidebar>
   );

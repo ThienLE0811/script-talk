@@ -8,6 +8,8 @@ export const AI_ERROR_TEXT: Record<string, string> = {
   bad_request: "Yêu cầu gửi lên không hợp lệ.",
   upstream_error: "Gemini đang gặp lỗi. Thử lại sau ít phút.",
   network: "Không kết nối được tới server. Kiểm tra mạng rồi thử lại.",
+  unauthorized: "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.",
+  auth_not_configured: "Server chưa đặt APP_ACCESS_CODE.",
 };
 
 export function aiErrorText(code: string | null | undefined): string {
@@ -38,7 +40,16 @@ export async function postJSON<T>(url: string, body: unknown, signal?: AbortSign
   return (await res.json()) as T;
 }
 
+function goToLogin() {
+  if (typeof window === "undefined" || window.location.pathname === "/login") return;
+  const next = encodeURIComponent(window.location.pathname + window.location.search);
+  window.location.assign(`/login?next=${next}`);
+}
+
+/** A 401 from any API route means the session expired: send the user to /login. */
 export async function readAiError(res: Response): Promise<AiRequestError> {
   const body = await res.json().catch(() => null);
-  return new AiRequestError(typeof body?.error === "string" ? body.error : "upstream_error");
+  const code = typeof body?.error === "string" ? body.error : res.status === 401 ? "unauthorized" : "upstream_error";
+  if (res.status === 401 && code === "unauthorized") goToLogin();
+  return new AiRequestError(code);
 }
