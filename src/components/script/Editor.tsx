@@ -7,13 +7,14 @@ import {
   Loader2Icon,
   PlayIcon,
   RotateCcwIcon,
+  SearchIcon,
   SaveIcon,
   SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UploadIcon,
 } from "lucide-react";
-import { useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,10 +34,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { aiErrorText } from "@/lib/ai-errors";
-import type { ParsedScript } from "@/lib/script";
+import { parseScript, type ParsedScript } from "@/lib/script";
+import { cn } from "@/lib/utils";
 import type { LineMode, SavedScript, Settings } from "@/lib/settings";
 import type { SavedStatus } from "./ScriptPractice";
 
@@ -175,43 +178,7 @@ export default function Editor(p: Props) {
               Chưa có kịch bản nào được lưu. Bấm “Lưu kịch bản”, hoặc “Nhập” để mở file .json đã xuất trước đó.
             </p>
           ) : (
-            <ul className="divide-y">
-              {p.saved.map((item) => (
-                <li
-                  key={item.id}
-                  className={`flex items-center gap-2 py-1.5 pr-2 pl-3 ${item.id === p.currentId ? "bg-accent/60" : ""}`}
-                >
-                  <button
-                    className="min-w-0 flex-1 truncate text-left text-sm hover:text-primary"
-                    onClick={() => p.onLoad(item)}
-                  >
-                    {item.title}
-                  </button>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {new Date(item.updatedAt).toLocaleDateString("vi-VN")}
-                  </span>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon-sm" aria-label={`Xoá ${item.title}`}>
-                        <Trash2Icon className="text-muted-foreground" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent size="sm">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Xoá kịch bản?</AlertDialogTitle>
-                        <AlertDialogDescription>“{item.title}” sẽ bị xoá khỏi trình duyệt này.</AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Huỷ</AlertDialogCancel>
-                        <AlertDialogAction variant="destructive" onClick={() => p.onDelete(item.id)}>
-                          Xoá
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </li>
-              ))}
-            </ul>
+            <SavedList saved={p.saved} currentId={p.currentId} onLoad={p.onLoad} onDelete={p.onDelete} />
           )}
         </Card>
       </section>
@@ -340,6 +307,125 @@ export default function Editor(p: Props) {
         </CardFooter>
       </Card>
     </div>
+  );
+}
+
+/** Show the search box from this many saved scripts. */
+const SEARCH_FROM = 5;
+
+/** Lowercase and strip Vietnamese diacritics so "khach san" finds "Khách sạn". */
+const fold = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase();
+
+function relativeDay(ms: number): string {
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((day(new Date()) - day(new Date(ms))) / 86_400_000);
+  if (diff <= 0) return "hôm nay";
+  if (diff === 1) return "hôm qua";
+  if (diff < 7) return `${diff} ngày trước`;
+  return new Date(ms).toLocaleDateString("vi-VN");
+}
+
+/**
+ * Saved scripts: searchable once the list grows, and capped in height (scrolls inside) so a long
+ * library never pushes the page down.
+ */
+function SavedList({
+  saved,
+  currentId,
+  onLoad,
+  onDelete,
+}: {
+  saved: SavedScript[];
+  currentId: string | null;
+  onLoad: (s: SavedScript) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const rows = useMemo(
+    () =>
+      saved.map((s) => {
+        const parsed = parseScript(s.raw);
+        return { script: s, lines: parsed.lines.length, speakers: parsed.speakers, haystack: fold(`${s.title}\n${s.raw}`) };
+      }),
+    [saved],
+  );
+  const q = fold(query.trim());
+  const visible = q ? rows.filter((r) => r.haystack.includes(q)) : rows;
+
+  return (
+    <>
+      {saved.length >= SEARCH_FROM && (
+        <div className="border-b p-2">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Tìm theo tiêu đề hoặc nội dung…"
+              aria-label="Tìm kịch bản đã lưu"
+              className="h-8 pl-8"
+            />
+          </div>
+        </div>
+      )}
+      {visible.length === 0 ? (
+        <p className="px-3 py-4 text-sm text-muted-foreground">Không có kịch bản nào khớp “{query.trim()}”.</p>
+      ) : (
+        <ul className="max-h-80 divide-y overflow-y-auto overscroll-contain">
+          {visible.map(({ script: item, lines, speakers }) => {
+            const active = item.id === currentId;
+            return (
+              <li key={item.id} className={cn("flex items-center gap-1 pr-1.5", active && "bg-accent/60")}>
+                <button
+                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 py-2 pl-3 text-left outline-none hover:text-primary focus-visible:bg-accent/60"
+                  onClick={() => onLoad(item)}
+                  aria-current={active ? "true" : undefined}
+                >
+                  <span className={cn("w-full truncate text-sm", active && "font-medium")}>{item.title}</span>
+                  <span className="w-full truncate text-xs text-muted-foreground">
+                    {lines} câu
+                    {speakers.length > 0 && ` · ${speakers.join(", ")}`} · {relativeDay(item.updatedAt)}
+                  </span>
+                </button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" aria-label={`Xoá ${item.title}`}>
+                      <Trash2Icon className="text-muted-foreground" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent size="sm">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Xoá kịch bản?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        “{item.title}” sẽ bị xoá khỏi server, trên mọi thiết bị. Nên bấm “Xuất” trước nếu muốn giữ bản
+                        sao.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Huỷ</AlertDialogCancel>
+                      <AlertDialogAction variant="destructive" onClick={() => onDelete(item.id)}>
+                        Xoá
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {q && visible.length > 0 && (
+        <p className="border-t px-3 py-1.5 text-xs text-muted-foreground">
+          {visible.length}/{saved.length} kịch bản khớp
+        </p>
+      )}
+    </>
   );
 }
 
