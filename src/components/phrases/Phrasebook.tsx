@@ -5,6 +5,7 @@ import {
   Loader2Icon,
   PlusIcon,
   RotateCcwIcon,
+  SearchIcon,
   Trash2Icon,
   TriangleAlertIcon,
   Volume2Icon,
@@ -22,6 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { TablePager, usePagination } from "@/components/common/TablePager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,6 +43,7 @@ import {
   type PhraseSource,
 } from "@/lib/phrasebook";
 import { addPhrases, deletePhrase, fetchPhrases } from "@/lib/phrases-client";
+import { fold } from "@/lib/search";
 import { DEFAULT_SETTINGS, loadJSON, STORAGE_KEYS } from "@/lib/settings";
 import { isRecognitionSupported, speak, stopSpeaking, useEnglishVoices } from "@/lib/speech";
 import { cn } from "@/lib/utils";
@@ -50,11 +53,16 @@ type Filter = "due" | "all" | "mastered";
 type Status = { state: "loading" } | { state: "ready" } | { state: "error"; code: string };
 
 const SOURCE_LABEL: Record<PhraseSource, string> = { chat: "Trò chuyện", script: "Kịch bản", manual: "Tự thêm" };
+/** Rows per page of the table. */
+const PAGE_SIZE = 20;
+/** Show the search box from this many phrases. */
+const SEARCH_FROM = 5;
 
 export default function Phrasebook() {
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [status, setStatus] = useState<Status>({ state: "loading" });
   const [filter, setFilter] = useState<Filter>("due");
+  const [query, setQuery] = useState("");
   const [reviewing, setReviewing] = useState<Phrase[] | null>(null);
   const [newText, setNewText] = useState("");
   const [newNote, setNewNote] = useState("");
@@ -86,8 +94,13 @@ export default function Phrasebook() {
   const stats = useMemo(() => phraseStats(phrases, now), [phrases, now]);
   const visible = useMemo(() => {
     const list = filter === "due" ? phrases.filter((p) => isDue(p, now)) : filter === "mastered" ? phrases.filter(isMastered) : phrases;
-    return filter === "all" ? [...list].sort((a, b) => b.createdAt - a.createdAt) : list;
-  }, [phrases, filter, now]);
+    const q = fold(query.trim());
+    const found = q
+      ? list.filter((p) => fold([p.text, p.original, p.note, p.context].filter(Boolean).join("\n")).includes(q))
+      : list;
+    return filter === "all" ? [...found].sort((a, b) => b.createdAt - a.createdAt) : found;
+  }, [phrases, filter, now, query]);
+  const { current, pageCount, first, rows: pageRows, scrollRef, goToPage } = usePagination(visible, PAGE_SIZE);
 
   const addOne = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +157,7 @@ export default function Phrasebook() {
   const queue = reviewQueue(phrases, now);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Sổ tay câu</h1>
         <p className="text-sm text-muted-foreground">
@@ -213,45 +226,86 @@ export default function Phrasebook() {
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-3">
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              value={filter}
-              onValueChange={(v) => v && setFilter(v as Filter)}
-              className="flex-wrap"
-            >
-              <ToggleGroupItem value="due" className="rounded-full px-3">
-                Cần ôn ({stats.due})
-              </ToggleGroupItem>
-              <ToggleGroupItem value="all" className="rounded-full px-3">
-                Tất cả ({stats.total})
-              </ToggleGroupItem>
-              <ToggleGroupItem value="mastered" className="rounded-full px-3">
-                Đã thuộc ({stats.mastered})
-              </ToggleGroupItem>
-            </ToggleGroup>
+          <Card className="gap-0 overflow-hidden py-0">
+            <div className="flex flex-wrap items-center gap-2 border-b p-2">
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={filter}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setFilter(v as Filter);
+                  goToPage(0);
+                }}
+                className="flex-wrap"
+              >
+                <ToggleGroupItem value="due" className="rounded-full px-3">
+                  Cần ôn ({stats.due})
+                </ToggleGroupItem>
+                <ToggleGroupItem value="all" className="rounded-full px-3">
+                  Tất cả ({stats.total})
+                </ToggleGroupItem>
+                <ToggleGroupItem value="mastered" className="rounded-full px-3">
+                  Đã thuộc ({stats.mastered})
+                </ToggleGroupItem>
+              </ToggleGroup>
+              {phrases.length >= SEARCH_FROM && (
+                <div className="relative min-w-48 flex-1">
+                  <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      goToPage(0);
+                    }}
+                    placeholder="Tìm câu, ghi chú…"
+                    aria-label="Tìm trong sổ tay"
+                    className="h-8 pl-8"
+                  />
+                </div>
+              )}
+            </div>
 
             {status.state === "loading" ? (
-              <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
                 <Loader2Icon className="size-4 animate-spin" /> Đang tải sổ tay…
               </p>
             ) : visible.length === 0 ? (
-              <p className="py-6 text-sm text-muted-foreground">
-                {stats.total === 0
-                  ? "Sổ tay đang trống. Hãy trò chuyện ở chế độ Trò chuyện tự nhiên (câu được sửa sẽ tự vào đây), lưu các câu chưa đạt khi luyện kịch bản, hoặc tự thêm câu ở ô phía trên."
-                  : filter === "due"
-                    ? "Không còn câu nào cần ôn hôm nay. Quay lại vào ngày mai nhé!"
-                    : "Chưa có câu nào ở mục này."}
+              <p className="px-4 py-6 text-sm text-muted-foreground">
+                {emptyText(stats.total, filter, query.trim())}
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
-                {visible.map((p) => (
-                  <PhraseRow key={p.id} phrase={p} now={now} onPlay={play} onDelete={() => void remove(p.id)} />
-                ))}
-              </ul>
+              // Height-capped: long pages scroll inside the table, with the header row kept in view.
+              <div ref={scrollRef} className="max-h-[60vh] overflow-y-auto overscroll-contain">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-muted text-left text-xs text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]">
+                    <tr>
+                      {/* "Câu" takes the free width; the other columns are as narrow as their content (w-px). */}
+                      <th className="px-4 py-2 font-medium">Câu</th>
+                      <th className="hidden w-px px-3 py-2 font-medium whitespace-nowrap md:table-cell">Nguồn</th>
+                      <th className="hidden w-px px-3 py-2 font-medium whitespace-nowrap sm:table-cell">Mức nhớ</th>
+                      <th className="hidden w-px px-3 py-2 font-medium whitespace-nowrap sm:table-cell">Ôn lại</th>
+                      <th className="w-px px-2 py-2">
+                        <span className="sr-only">Thao tác</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {pageRows.map((p) => (
+                      <PhraseRow key={p.id} phrase={p} now={now} onPlay={play} onDelete={() => void remove(p.id)} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </div>
+            {visible.length > 0 && (pageCount > 1 || query.trim()) && (
+              <TablePager current={current} pageCount={pageCount} onPageChange={goToPage}>
+                {pageCount > 1 && `${first + 1}–${first + pageRows.length} / `}
+                {visible.length} câu
+              </TablePager>
+            )}
+          </Card>
         </div>
       )}
     </div>
@@ -269,48 +323,100 @@ function PhraseRow({
   onPlay: (text: string) => void;
   onDelete: () => void;
 }) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  const due = <span className={cn(isDue(p, now) && "font-medium text-primary")}>{dueLabel(p.dueAt, now)}</span>;
   return (
-    <li className="flex items-start gap-2 rounded-xl border bg-card p-3">
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{p.text}</p>
-        {p.original && <p className="text-sm text-muted-foreground line-through decoration-destructive/50">{p.original}</p>}
-        {p.note && <p className="mt-0.5 text-sm text-muted-foreground">{p.note}</p>}
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+    <tr className="align-top transition-colors hover:bg-muted/30">
+      <td className="px-4 py-3">
+        <p className="font-medium wrap-break-word">{p.text}</p>
+        {p.original && (
+          <p className="mt-0.5 text-xs text-muted-foreground line-through decoration-destructive/50 wrap-break-word">
+            {p.original}
+          </p>
+        )}
+        {p.note && (
+          // Explanations can be long: two lines, click to read all.
+          <button
+            type="button"
+            onClick={() => setNoteOpen((v) => !v)}
+            aria-expanded={noteOpen}
+            title={noteOpen ? "Thu gọn" : "Bấm để xem đầy đủ"}
+            className={cn(
+              "mt-1 block max-w-prose cursor-pointer text-left text-xs leading-relaxed text-muted-foreground wrap-break-word hover:text-foreground",
+              !noteOpen && "line-clamp-2",
+            )}
+          >
+            {p.note}
+          </button>
+        )}
+        {/* Columns hidden on small screens, folded into one line. */}
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:hidden">
           <Badge variant="secondary">{SOURCE_LABEL[p.source]}</Badge>
-          {p.context && <span className="truncate">{p.context}</span>}
-          <span aria-label={`Mức nhớ ${p.box}/${MAX_BOX}`} title={`Mức nhớ ${p.box}/${MAX_BOX}`} className="flex gap-0.5">
-            {Array.from({ length: MAX_BOX }, (_, i) => (
-              <span key={i} className={cn("size-1.5 rounded-full", i < p.box ? "bg-primary" : "bg-border")} />
-            ))}
-          </span>
-          <span className={cn(isDue(p, now) && "font-medium text-primary")}>{dueLabel(p.dueAt, now)}</span>
-          {p.lastScore !== undefined && <span>· lần trước {p.lastScore}%</span>}
-        </div>
-      </div>
-      <Button variant="ghost" size="icon-sm" aria-label={`Nghe: ${p.text}`} onClick={() => onPlay(p.text)}>
-        <Volume2Icon />
-      </Button>
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="Xoá câu khỏi sổ tay">
-            <Trash2Icon className="text-muted-foreground" />
+          <BoxDots box={p.box} />
+          {due}
+        </p>
+      </td>
+      <td className="hidden px-3 py-3 md:table-cell">
+        <Badge variant="secondary">{SOURCE_LABEL[p.source]}</Badge>
+        {p.context && (
+          <p className="mt-1 max-w-40 truncate text-xs text-muted-foreground" title={p.context}>
+            {p.context}
+          </p>
+        )}
+      </td>
+      <td className="hidden px-3 py-3 whitespace-nowrap sm:table-cell">
+        <BoxDots box={p.box} />
+        {p.lastScore !== undefined && <p className="mt-1 text-xs text-muted-foreground">lần trước {p.lastScore}%</p>}
+      </td>
+      <td className="hidden px-3 py-3 whitespace-nowrap sm:table-cell">{due}</td>
+      <td className="px-2 py-2">
+        <div className="flex items-center justify-end gap-0.5">
+          <Button variant="ghost" size="icon-sm" aria-label={`Nghe: ${p.text}`} onClick={() => onPlay(p.text)}>
+            <Volume2Icon />
           </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Xoá câu khỏi sổ tay?</AlertDialogTitle>
-            <AlertDialogDescription>“{p.text}” và tiến độ ôn của nó sẽ bị xoá.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Huỷ</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={onDelete}>
-              Xoá
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </li>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Xoá câu khỏi sổ tay">
+                <Trash2Icon className="text-muted-foreground" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Xoá câu khỏi sổ tay?</AlertDialogTitle>
+                <AlertDialogDescription>“{p.text}” và tiến độ ôn của nó sẽ bị xoá.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Huỷ</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={onDelete}>
+                  Xoá
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </td>
+    </tr>
   );
+}
+
+/** Memory level as dots: one per Leitner box reached. */
+function BoxDots({ box }: { box: number }) {
+  return (
+    <span aria-label={`Mức nhớ ${box}/${MAX_BOX}`} title={`Mức nhớ ${box}/${MAX_BOX}`} className="inline-flex gap-0.5">
+      {Array.from({ length: MAX_BOX }, (_, i) => (
+        <span key={i} className={cn("size-1.5 rounded-full", i < box ? "bg-primary" : "bg-border")} />
+      ))}
+    </span>
+  );
+}
+
+function emptyText(total: number, filter: Filter, query: string): string {
+  if (total === 0) {
+    return "Sổ tay đang trống. Hãy trò chuyện ở chế độ Trò chuyện tự nhiên (câu được sửa sẽ tự vào đây), lưu các câu chưa đạt khi luyện kịch bản, hoặc tự thêm câu ở ô phía trên.";
+  }
+  if (query) return `Không có câu nào khớp “${query}”.`;
+  if (filter === "due") return "Không còn câu nào cần ôn hôm nay. Quay lại vào ngày mai nhé!";
+  return "Chưa có câu nào ở mục này.";
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: "primary" | "success" }) {
