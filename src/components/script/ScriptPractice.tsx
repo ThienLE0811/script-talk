@@ -275,6 +275,7 @@ export default function ScriptPractice() {
         recSupported={!!recSupported}
         onComplete={savedPracticed ? () => void onPracticeComplete() : undefined}
         practiceCount={savedPracticed?.practiceCount}
+        onToggleTranslation={() => setSettings((s) => ({ ...s, showTranslation: !s.showTranslation }))}
         onExit={() => switchMode("edit")}
         onRetryLines={(lineIndexes) => {
           setPracticeScript(buildRetryScript(practiceScript, myRoles, lineIndexes));

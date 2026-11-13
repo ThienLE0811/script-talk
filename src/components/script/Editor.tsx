@@ -288,6 +288,13 @@ export default function Editor(p: Props) {
               hint="Tắt đi để luyện nghe"
             />
             <CheckField
+              id="show-translation"
+              checked={s.showTranslation}
+              onChange={(v) => set({ showTranslation: v })}
+              label="Hiện nghĩa tiếng Việt"
+              hint="Chrome dịch ngay trên máy, không tốn lượt AI (lần đầu tải gói Anh–Việt). Bật cùng chế độ “Ẩn” câu của bạn để luyện nhớ câu."
+            />
+            <CheckField
               id="auto-advance"
               checked={s.autoAdvance}
               onChange={(v) => set({ autoAdvance: v })}

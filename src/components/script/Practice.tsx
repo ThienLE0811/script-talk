@@ -5,6 +5,7 @@ import {
   ArrowRightIcon,
   CheckIcon,
   EyeIcon,
+  LanguagesIcon,
   Loader2Icon,
   MicIcon,
   NotebookPenIcon,
@@ -32,6 +33,7 @@ import { failedLineIndexes } from "@/lib/practice";
 import { cleanForSpeech, compareLine, hintText, type Comparison, type ParsedScript } from "@/lib/script";
 import type { LineMode, Settings } from "@/lib/settings";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
+import { useViTranslations, type TranslationStatus } from "@/lib/translate";
 import { cn } from "@/lib/utils";
 
 type Phase = "speaking" | "listening" | "waiting" | "result" | "paused" | "done";
@@ -51,6 +53,8 @@ type Props = {
   onComplete?: () => void;
   /** How many times this saved script has been completed (shown on the result card). */
   practiceCount?: number;
+  /** Turn the Vietnamese subtitles (settings.showTranslation) on or off from the practice screen. */
+  onToggleTranslation?: () => void;
 };
 
 export default function Practice({
@@ -63,8 +67,18 @@ export default function Practice({
   onRetryLines,
   onComplete,
   practiceCount,
+  onToggleTranslation,
 }: Props) {
   const lines = script.lines;
+  // Notes in (brackets) are not translated, like they are not spoken.
+  const spokenText = lines.map((l) => cleanForSpeech(l.text).trim());
+  const tr = useViTranslations(spokenText, settings.showTranslation);
+  const subtitle = (i: number) =>
+    settings.showTranslation && tr.vi[spokenText[i]] ? (
+      <p className="mt-1 text-sm leading-snug text-muted-foreground" lang="vi">
+        {tr.vi[spokenText[i]]}
+      </p>
+    ) : null;
   const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState<Phase>("speaking");
   const [interim, setInterim] = useState("");
@@ -273,11 +287,27 @@ export default function Practice({
             <ArrowLeftIcon /> Kịch bản
           </Button>
           <div className="min-w-0 truncate text-sm font-medium">{script.title || "Hội thoại"}</div>
-          <Badge variant="secondary" className="tabular-nums">
-            {Math.min(idx + 1, lines.length)}/{lines.length}
-          </Badge>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onToggleTranslation && (
+              <Hint label={settings.showTranslation ? "Ẩn nghĩa tiếng Việt" : "Hiện nghĩa tiếng Việt"}>
+                <Button
+                  variant={settings.showTranslation ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  onClick={onToggleTranslation}
+                  aria-label="Nghĩa tiếng Việt"
+                  aria-pressed={settings.showTranslation}
+                >
+                  <LanguagesIcon className={cn(settings.showTranslation && "text-primary")} />
+                </Button>
+              </Hint>
+            )}
+            <Badge variant="secondary" className="tabular-nums">
+              {Math.min(idx + 1, lines.length)}/{lines.length}
+            </Badge>
+          </div>
         </div>
         <Progress value={(idx / lines.length) * 100} className="mb-6 h-1" />
+        <TranslationNotice status={tr.status} progress={tr.progress} onRetry={tr.retry} />
 
         {/* Conversation */}
         <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -296,7 +326,10 @@ export default function Practice({
                     )}
                   >
                     {showText ? (
-                      <p className="leading-relaxed">{line.text}</p>
+                      <>
+                        <p className="leading-relaxed">{line.text}</p>
+                        {subtitle(i)}
+                      </>
                     ) : (
                       <Button
                         variant="ghost"
@@ -368,6 +401,8 @@ export default function Practice({
                   ) : (
                     <p className="leading-relaxed">{mode === "hint" ? hintText(line.text) : line.text}</p>
                   )}
+                  {/* Always shown for the learner's lines: with the line hidden it is the cue to recall it. */}
+                  {subtitle(i)}
                   {res && "skipped" in res && <p className="mt-1 text-xs text-muted-foreground">(đã bỏ qua)</p>}
                   {active && !res && mode !== "full" && (
                     <Button
@@ -511,6 +546,45 @@ export default function Practice({
             </p>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** One line under the progress bar when the Vietnamese subtitles cannot be shown (yet). */
+function TranslationNotice({
+  status,
+  progress,
+  onRetry,
+}: {
+  status: TranslationStatus;
+  progress: number;
+  onRetry: () => void;
+}) {
+  const text: Partial<Record<TranslationStatus, string>> = {
+    unsupported: "Trình duyệt này chưa có bộ dịch tích hợp nên chưa hiện được nghĩa tiếng Việt. Hãy dùng Chrome bản mới trên máy tính.",
+    unavailable: "Chrome trên máy này chưa dịch được tiếng Anh sang tiếng Việt.",
+    "needs-download": "Cần tải bộ dịch Anh–Việt của Chrome (chỉ một lần, sau đó dịch ngay trên máy).",
+    downloading: `Đang tải bộ dịch Anh–Việt… ${Math.round(progress * 100)}%`,
+    error: "Chưa dịch được sang tiếng Việt.",
+  };
+  const message = text[status];
+  if (!message) return null;
+  const action = ({ "needs-download": "Tải bộ dịch", error: "Thử lại" } as Partial<Record<TranslationStatus, string>>)[
+    status
+  ];
+  return (
+    <div className="-mt-3 mb-4 flex items-center gap-2 text-xs text-muted-foreground" role="status">
+      {status === "downloading" ? (
+        <Loader2Icon className="size-3.5 shrink-0 animate-spin" />
+      ) : (
+        <LanguagesIcon className="size-3.5 shrink-0" />
+      )}
+      <span className="min-w-0 flex-1">{message}</span>
+      {action && (
+        <Button variant="outline" size="xs" onClick={onRetry}>
+          {action}
+        </Button>
       )}
     </div>
   );

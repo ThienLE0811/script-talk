@@ -8,6 +8,8 @@ export type Settings = {
   showPartnerText: boolean;
   threshold: number;
   autoAdvance: boolean;
+  /** Vietnamese subtitle under each line (translated on the device, see lib/translate.ts). */
+  showTranslation: boolean;
   /** Order of the saved scripts list. */
   savedSort: SavedSort;
 };
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showPartnerText: true,
   threshold: 80,
   autoAdvance: true,
+  showTranslation: false,
   savedSort: "updated",
 };
 
