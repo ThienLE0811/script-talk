@@ -30,6 +30,8 @@ export type ChatSettings = {
   voiceURI: string | null;
   /** Start each conversation with a mission (concrete goals to reach). */
   mission: boolean;
+  /** "Tình huống khó": the AI now and then misunderstands, answers vaguely or raises a problem. */
+  challenge: boolean;
 };
 
 const K_CHAT_SETTINGS = "scripttalk.chat.settings";
@@ -40,6 +42,7 @@ const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   rate: 0.95,
   voiceURI: null,
   mission: true,
+  challenge: false,
 };
 
 /** The "natural conversation" mode: pick a topic, then talk freely with the AI. */
@@ -106,7 +109,13 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
         // A reopened conversation keeps its own topic and level; voice and speed follow the current settings.
         settings={
           initial
-            ? { ...settings, topicId: initial.topicId, customTopic: initial.customTopic ?? "", level: initial.level }
+            ? {
+                ...settings,
+                topicId: initial.topicId,
+                customTopic: initial.customTopic ?? "",
+                level: initial.level,
+                challenge: initial.challenge ?? false,
+              }
             : settings
         }
         voiceURI={voiceURI}
@@ -236,6 +245,23 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
                 <span className="text-xs text-muted-foreground">
                   AI giao 3 mục tiêu cụ thể (ví dụ: đặt phòng 2 đêm, hỏi có bữa sáng không, xin giảm giá) và đánh dấu
                   khi bạn làm được.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="chat-challenge"
+                checked={settings.challenge}
+                onCheckedChange={(v) => set({ challenge: v === true })}
+                className="mt-0.5"
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="chat-challenge" className="font-normal">
+                  Tình huống khó
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  Thỉnh thoảng AI sẽ hiểu nhầm ý bạn, trả lời mơ hồ, hỏi bất ngờ hoặc gặp sự cố (hết hàng, hết phòng…)
+                  như ngoài đời. Luyện cách sửa hiểu lầm và hỏi lại: “Sorry, I meant…”, “What do you mean by…?”
                 </span>
               </div>
             </div>

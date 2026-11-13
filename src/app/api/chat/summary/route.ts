@@ -6,6 +6,7 @@ import {
   toErrorResponse,
   withModelFallback,
 } from "@/lib/chat/gemini.server";
+import { CHALLENGE_SUMMARY_NOTE, readChallenge } from "@/lib/chat/challenge";
 import { missionSummaryNote, readGoalIndexes, readMission } from "@/lib/chat/mission";
 import { MAX_CUSTOM_TOPIC_LENGTH, MAX_TEXT_LENGTH, sanitizeHistory, scenarioFor } from "@/lib/chat/prompts";
 import {
@@ -32,7 +33,7 @@ function sanitizeCorrections(input: unknown): Correction[] {
 }
 
 /**
- * POST { topicId, customTopic?, level, history, corrections, mission?, goalsDone? }
+ * POST { topicId, customTopic?, level, history, corrections, mission?, goalsDone?, challenge? }
  * Returns ChatSummary (Vietnamese feedback on the whole conversation) as JSON.
  */
 export async function POST(req: Request) {
@@ -46,9 +47,9 @@ export async function POST(req: Request) {
   }
   const customTopic = typeof body.customTopic === "string" ? body.customTopic.slice(0, MAX_CUSTOM_TOPIC_LENGTH) : "";
   const mission = readMission(body.mission);
-  const missionNote = mission
-    ? missionSummaryNote(mission, readGoalIndexes(body.goalsDone, mission.goals.length))
-    : "";
+  const extraNote =
+    (mission ? missionSummaryNote(mission, readGoalIndexes(body.goalsDone, mission.goals.length)) : "") +
+    (readChallenge(body.challenge) ? CHALLENGE_SUMMARY_NOTE : "");
 
   try {
     const res = await withModelFallback(req.signal, (model) =>
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
         contents: [
           {
             role: "user",
-            parts: [{ text: buildSummaryUserPrompt(history, sanitizeCorrections(body.corrections)) + missionNote }],
+            parts: [{ text: buildSummaryUserPrompt(history, sanitizeCorrections(body.corrections)) + extraNote }],
           },
         ],
         config: {

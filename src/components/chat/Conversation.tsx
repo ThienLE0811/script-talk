@@ -157,6 +157,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     customTopic: settings.customTopic,
     level: settings.level,
     mission: missionRef.current ?? undefined,
+    challenge: settings.challenge || undefined,
   });
   const goalsDone = completedGoals(toSaved(turns), mission);
 
@@ -597,6 +598,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
       level: settings.level,
       topicLabel,
       ...(mission ? { mission } : {}),
+      ...(settings.challenge ? { challenge: true } : {}),
       turns: saved,
       ...(summaryIsCurrent ? { summary: summary.data } : {}),
     };
@@ -770,6 +772,11 @@ export default function Conversation({ settings, voiceURI, recSupported, session
             <p className="truncate text-sm font-medium">{topicLabel}</p>
             <p className="text-xs text-muted-foreground">
               {levelLabel}
+              {settings.challenge && (
+                <span className="text-amber-600 dark:text-amber-400" title="AI thỉnh thoảng hiểu nhầm, nói mơ hồ hoặc gặp sự cố">
+                  {levelLabel ? " · " : ""}Tình huống khó
+                </span>
+              )}
               {saveError && (
                 <span className="text-amber-600 dark:text-amber-400" title={aiErrorText(saveError)}>
                   {levelLabel ? " · " : ""}Chưa lưu được vào lịch sử

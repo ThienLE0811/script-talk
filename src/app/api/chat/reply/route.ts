@@ -13,12 +13,13 @@ import {
   toErrorResponse,
   withModelFallback,
 } from "@/lib/chat/gemini.server";
+import { CHALLENGE_PARTNER_PROMPT, readChallenge } from "@/lib/chat/challenge";
 import { missionPartnerPrompt, readMission } from "@/lib/chat/mission";
 
 export const runtime = "nodejs";
 
 /**
- * POST { topicId, customTopic?, level, history: ChatTurn[], mission? }
+ * POST { topicId, customTopic?, level, history: ChatTurn[], mission?, challenge? }
  * Streams the partner's next reply as plain UTF-8 text.
  */
 export async function POST(req: Request) {
@@ -32,6 +33,7 @@ export async function POST(req: Request) {
   }
   const customTopic = typeof body.customTopic === "string" ? body.customTopic.slice(0, MAX_CUSTOM_TOPIC_LENGTH) : "";
   const mission = readMission(body.mission);
+  const challenge = readChallenge(body.challenge);
 
   // Gemini needs the first turn to be from the user; the start instruction lets the model open the conversation.
   const contents = [
@@ -48,7 +50,8 @@ export async function POST(req: Request) {
         config: {
           systemInstruction:
             buildReplySystemPrompt(scenarioFor(body.topicId, customTopic), body.level) +
-            (mission ? missionPartnerPrompt(mission) : ""),
+            (mission ? missionPartnerPrompt(mission) : "") +
+            (challenge ? CHALLENGE_PARTNER_PROMPT : ""),
           // Thinking tokens count toward this cap, so leave headroom above the ~40-word reply.
           maxOutputTokens: 1024,
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },

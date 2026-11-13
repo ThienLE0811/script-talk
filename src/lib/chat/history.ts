@@ -53,6 +53,8 @@ export type ChatSession = {
   /** Display name of the topic at the time of the session. */
   topicLabel: string;
   mission?: Mission;
+  /** "Tình huống khó" was on (see lib/chat/challenge.ts). */
+  challenge?: boolean;
   turns: SavedTurn[];
   summary?: ChatSummary;
   stats: ChatSessionStats;
@@ -63,7 +65,10 @@ export type ChatSession = {
 };
 
 /** What the client sends when saving; the server adds stats and timestamps. */
-export type ChatSessionInput = Pick<ChatSession, "topicId" | "customTopic" | "level" | "topicLabel" | "mission" | "turns" | "summary">;
+export type ChatSessionInput = Pick<
+  ChatSession,
+  "topicId" | "customTopic" | "level" | "topicLabel" | "mission" | "challenge" | "turns" | "summary"
+>;
 
 /** A session in lists and on the progress page: everything but the transcript. */
 export type ChatSessionMeta = Omit<ChatSession, "turns" | "summary" | "mission"> & {
@@ -162,6 +167,7 @@ export function readChatSessionInput(input: unknown): ChatSessionInput | null {
   }
   const mission = readMission(d.mission);
   if (mission) out.mission = mission;
+  if (d.challenge === true) out.challenge = true;
   const summary = parseSummaryObject(d.summary);
   if (summary) out.summary = summary;
   return out;

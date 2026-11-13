@@ -40,6 +40,7 @@ export async function listChats(db: Db): Promise<ChatSessionMeta[]> {
     ...(rest.customTopic ? { customTopic: rest.customTopic } : {}),
     level: rest.level,
     topicLabel: rest.topicLabel,
+    ...(rest.challenge ? { challenge: true } : {}),
     stats: rest.stats,
     activity: rest.activity ?? [],
     createdAt: rest.createdAt,
@@ -62,7 +63,7 @@ export async function saveChat(db: Db, id: string, input: ChatSessionInput): Pro
   const prev = await col.findOne({ _id: id }, { projection: { "stats.userTurns": 1 } });
   const practiced = !prev || stats.userTurns > (prev.stats?.userTurns ?? 0);
   // Fields the new version no longer has (e.g. a summary made before "Trò chuyện tiếp").
-  const unset = (["summary", "mission", "customTopic"] as const).filter((k) => !input[k]);
+  const unset = (["summary", "mission", "customTopic", "challenge"] as const).filter((k) => !input[k]);
   const doc = await col.findOneAndUpdate(
     { _id: id },
     {

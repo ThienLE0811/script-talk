@@ -7,13 +7,14 @@ import {
   toErrorResponse,
   withModelFallback,
 } from "@/lib/chat/gemini.server";
+import { readChallenge } from "@/lib/chat/challenge";
 import { readMission } from "@/lib/chat/mission";
 import { MAX_CUSTOM_TOPIC_LENGTH, sanitizeHistory, scenarioFor } from "@/lib/chat/prompts";
 
 export const runtime = "nodejs";
 
 /**
- * POST { topicId, customTopic?, level, history, mission? }
+ * POST { topicId, customTopic?, level, history, mission?, challenge? }
  * Returns { suggestions: ReplySuggestion[] }: things the learner could say next, with Vietnamese meanings.
  */
 export async function POST(req: Request) {
@@ -34,7 +35,12 @@ export async function POST(req: Request) {
         model,
         contents: [{ role: "user", parts: [{ text: buildSuggestUserPrompt(history) }] }],
         config: {
-          systemInstruction: buildSuggestSystemPrompt(scenarioFor(body.topicId, customTopic), body.level, mission),
+          systemInstruction: buildSuggestSystemPrompt(
+            scenarioFor(body.topicId, customTopic),
+            body.level,
+            mission,
+            readChallenge(body.challenge),
+          ),
           responseMimeType: "application/json",
           responseJsonSchema: SUGGEST_SCHEMA,
           maxOutputTokens: 2048,

@@ -90,6 +90,7 @@ export default function RecentChats({ opening, onOpen }: Props) {
                 <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                   <span>{relativeDayLabel(s.updatedAt, now)}</span>
                   <span>· {LEVELS.find((l) => l.id === s.level)?.label}</span>
+                  {s.challenge && <span className="text-amber-600 dark:text-amber-400">· Tình huống khó</span>}
                   <span>· {s.stats.userTurns} câu</span>
                   {s.stats.userTurns > 0 && <span>· {s.stats.good} tự nhiên</span>}
                   {s.stats.goalCount > 0 && (

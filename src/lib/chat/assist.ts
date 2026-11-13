@@ -3,6 +3,7 @@
  * reply suggestions when the learner is stuck, and Vietnamese translations of the partner's lines.
  * No DOM, no network.
  */
+import { CHALLENGE_SUGGEST_NOTE } from "./challenge";
 import type { Mission } from "./mission";
 import { levelPrompt, type ChatTurn } from "./prompts";
 
@@ -55,7 +56,12 @@ export const SUGGEST_SCHEMA = {
   required: ["suggestions"],
 } as const;
 
-export function buildSuggestSystemPrompt(scenario: string, level: string, mission?: Mission | null): string {
+export function buildSuggestSystemPrompt(
+  scenario: string,
+  level: string,
+  mission?: Mission | null,
+  challenge = false,
+): string {
   const missionNote = mission
     ? `
 The learner has a mission: ${mission.brief}
@@ -66,7 +72,7 @@ Prefer suggestions that move the mission forward.
   return `You help a Vietnamese learner who is stuck in a spoken English role-play and does not know what to say next.
 Scenario: ${scenario}
 Learner level: ${levelPrompt(level)}
-${missionNote}
+${missionNote}${challenge ? CHALLENGE_SUGGEST_NOTE : ""}
 Suggest 3 different things the learner could say next in reply to the partner's last line, in the learner's role.
 - Each suggestion is one or two short, natural spoken sentences that fit the learner's level.
 - Make them genuinely different (for example: a simple answer, an answer with a detail, a question back).
