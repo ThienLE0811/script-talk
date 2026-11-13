@@ -226,7 +226,8 @@ export default function Phrasebook() {
             </CardContent>
           </Card>
 
-          <Card className="gap-0 overflow-hidden py-0">
+          {/* overflow-clip (not hidden) keeps the rounded corners without breaking the sticky table header. */}
+          <Card className="gap-0 overflow-clip py-0">
             <div className="flex flex-wrap items-center gap-2 border-b p-2">
               <ToggleGroup
                 type="single"
@@ -276,10 +277,11 @@ export default function Phrasebook() {
                 {emptyText(stats.total, filter, query.trim())}
               </p>
             ) : (
-              // Height-capped: long pages scroll inside the table, with the header row kept in view.
-              <div ref={scrollRef} className="max-h-[60vh] overflow-y-auto overscroll-contain">
+              // The table grows with the page (no inner scroll box: it is the last thing on the page). The header
+              // row sticks under the app header (h-14) while scrolling; scroll-mt-14 for page changes.
+              <div ref={scrollRef} className="scroll-mt-14">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-muted text-left text-xs text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]">
+                  <thead className="sticky top-14 z-10 bg-muted text-left text-xs text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]">
                     <tr>
                       {/* "Câu" takes the free width; the other columns are as narrow as their content (w-px). */}
                       <th className="px-4 py-2 font-medium">Câu</th>

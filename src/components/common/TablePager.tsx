@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { pageItems } from "@/lib/search";
 
 /**
- * Client-side paging of `items`. Put `scrollRef` on the table's scroll container so changing page
- * scrolls it back to the top; call `goToPage(0)` when the search or filter changes.
+ * Client-side paging of `items`. Put `scrollRef` on the element around the table: changing page
+ * scrolls it back to its top (an inner scroll box), or scrolls the page up to it when it is above the
+ * viewport. Call `goToPage(0)` when the search or filter changes.
  */
 export function usePagination<T>(items: T[], pageSize: number) {
   const [page, setPage] = useState(0);
@@ -23,7 +24,10 @@ export function usePagination<T>(items: T[], pageSize: number) {
     scrollRef,
     goToPage: (n: number) => {
       setPage(n);
-      scrollRef.current?.scrollTo({ top: 0 });
+      const el = scrollRef.current;
+      if (!el) return;
+      if (el.scrollHeight > el.clientHeight) el.scrollTo({ top: 0 });
+      else if (el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: "start" });
     },
   };
 }
