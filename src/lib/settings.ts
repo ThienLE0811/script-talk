@@ -8,6 +8,8 @@ export type Settings = {
   showPartnerText: boolean;
   threshold: number;
   autoAdvance: boolean;
+  /** Order of the saved scripts list. */
+  savedSort: SavedSort;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showPartnerText: true,
   threshold: 80,
   autoAdvance: true,
+  savedSort: "updated",
 };
 
 export type SavedScript = {
@@ -29,6 +32,32 @@ export type SavedScript = {
   practiceCount?: number;
   lastPracticedAt?: number;
 };
+
+export type SavedSort = "updated" | "least" | "recent";
+
+export const SAVED_SORTS: { value: SavedSort; label: string }[] = [
+  { value: "updated", label: "Mới sửa" },
+  { value: "least", label: "Ít luyện nhất" },
+  { value: "recent", label: "Luyện gần đây" },
+];
+
+/**
+ * Saved scripts in the chosen order (unknown values fall back to "updated"):
+ * - updated: last edited first;
+ * - least: fewest practice runs first, then the one practised longest ago, so neglected scripts surface;
+ * - recent: last practised first, never-practised ones at the end.
+ * Ties keep the last-edited-first order.
+ */
+export function sortSavedScripts(list: SavedScript[], order: SavedSort): SavedScript[] {
+  const count = (s: SavedScript) => s.practiceCount ?? 0;
+  const last = (s: SavedScript) => s.lastPracticedAt ?? 0;
+  const byPractice = (a: SavedScript, b: SavedScript) => {
+    if (order === "least") return count(a) - count(b) || last(a) - last(b);
+    if (order === "recent") return last(b) - last(a);
+    return 0;
+  };
+  return [...list].sort((a, b) => byPractice(a, b) || b.updatedAt - a.updatedAt);
+}
 
 /** Every localStorage key the app uses. Changing a value's shape needs a migration. */
 export const STORAGE_KEYS = {

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowDownUpIcon,
   CloudUploadIcon,
   DownloadIcon,
   FilePlusIcon,
@@ -40,7 +41,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { aiErrorText } from "@/lib/ai-errors";
 import { parseScript, type ParsedScript } from "@/lib/script";
 import { cn } from "@/lib/utils";
-import type { LineMode, SavedScript, Settings } from "@/lib/settings";
+import { SAVED_SORTS, sortSavedScripts, type LineMode, type SavedScript, type SavedSort, type Settings } from "@/lib/settings";
 import type { SavedStatus } from "./ScriptPractice";
 
 type Props = {
@@ -178,7 +179,14 @@ export default function Editor(p: Props) {
               Chưa có kịch bản nào được lưu. Bấm “Lưu kịch bản”, hoặc “Nhập” để mở file .json đã xuất trước đó.
             </p>
           ) : (
-            <SavedList saved={p.saved} currentId={p.currentId} onLoad={p.onLoad} onDelete={p.onDelete} />
+            <SavedList
+              saved={p.saved}
+              currentId={p.currentId}
+              onLoad={p.onLoad}
+              onDelete={p.onDelete}
+              sort={p.settings.savedSort}
+              onSortChange={(savedSort) => p.onSettingsChange({ ...p.settings, savedSort })}
+            />
           )}
         </Card>
       </section>
@@ -312,6 +320,8 @@ export default function Editor(p: Props) {
 
 /** Show the search box from this many saved scripts. */
 const SEARCH_FROM = 5;
+/** Show the sort menu from this many saved scripts. */
+const SORT_FROM = 2;
 
 /** Lowercase and strip Vietnamese diacritics so "khach san" finds "Khách sạn". */
 const fold = (s: string) =>
@@ -340,38 +350,59 @@ function SavedList({
   currentId,
   onLoad,
   onDelete,
+  sort,
+  onSortChange,
 }: {
   saved: SavedScript[];
   currentId: string | null;
   onLoad: (s: SavedScript) => void;
   onDelete: (id: string) => void;
+  sort: SavedSort;
+  onSortChange: (sort: SavedSort) => void;
 }) {
   const [query, setQuery] = useState("");
   const rows = useMemo(
     () =>
-      saved.map((s) => {
+      sortSavedScripts(saved, sort).map((s) => {
         const parsed = parseScript(s.raw);
         return { script: s, lines: parsed.lines.length, speakers: parsed.speakers, haystack: fold(`${s.title}\n${s.raw}`) };
       }),
-    [saved],
+    [saved, sort],
   );
   const q = fold(query.trim());
   const visible = q ? rows.filter((r) => r.haystack.includes(q)) : rows;
+  const byPractice = sort === "least" || sort === "recent";
+  const sortValue = SAVED_SORTS.some((o) => o.value === sort) ? sort : "updated";
 
   return (
     <>
-      {saved.length >= SEARCH_FROM && (
-        <div className="border-b p-2">
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tìm theo tiêu đề hoặc nội dung…"
-              aria-label="Tìm kịch bản đã lưu"
-              className="h-8 pl-8"
-            />
-          </div>
+      {saved.length >= SORT_FROM && (
+        <div className="flex items-center gap-2 border-b p-2">
+          {saved.length >= SEARCH_FROM && (
+            <div className="relative min-w-0 flex-1">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Tìm theo tiêu đề hoặc nội dung…"
+                aria-label="Tìm kịch bản đã lưu"
+                className="h-8 pl-8"
+              />
+            </div>
+          )}
+          <Select value={sortValue} onValueChange={(v) => onSortChange(v as SavedSort)}>
+            <SelectTrigger aria-label="Sắp xếp kịch bản đã lưu" className="ml-auto shrink-0">
+              <ArrowDownUpIcon className="text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {SAVED_SORTS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
       {visible.length === 0 ? (
@@ -390,8 +421,19 @@ function SavedList({
                   <span className={cn("w-full truncate text-sm", active && "font-medium")}>{item.title}</span>
                   <span className="w-full truncate text-xs text-muted-foreground">
                     {lines} câu
-                    {!!item.practiceCount && ` · đã luyện ${item.practiceCount} lần`}
-                    {speakers.length > 0 && ` · ${speakers.join(", ")}`} · {relativeDay(item.updatedAt)}
+                    {byPractice ? (
+                      <>
+                        {speakers.length > 0 && ` · ${speakers.join(", ")}`} ·{" "}
+                        {item.practiceCount
+                          ? `luyện ${item.practiceCount} lần, gần nhất ${relativeDay(item.lastPracticedAt ?? item.updatedAt)}`
+                          : "chưa luyện"}
+                      </>
+                    ) : (
+                      <>
+                        {!!item.practiceCount && ` · đã luyện ${item.practiceCount} lần`}
+                        {speakers.length > 0 && ` · ${speakers.join(", ")}`} · {relativeDay(item.updatedAt)}
+                      </>
+                    )}
                   </span>
                 </button>
                 <AlertDialog>
