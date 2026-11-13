@@ -23,7 +23,14 @@ export function newScriptId(): string {
 }
 
 export function buildBackup(scripts: SavedScript[], now = new Date()): ScriptBackup {
-  return { app: BACKUP_APP, type: BACKUP_TYPE, version: BACKUP_VERSION, exportedAt: now.toISOString(), scripts };
+  return {
+    app: BACKUP_APP,
+    type: BACKUP_TYPE,
+    version: BACKUP_VERSION,
+    exportedAt: now.toISOString(),
+    // Only the content: practice counters stay on the server, so the file format is unchanged.
+    scripts: scripts.map(({ id, title, raw, updatedAt }) => ({ id, title, raw, updatedAt })),
+  };
 }
 
 /** "scripttalk-kich-ban-2026-11-12.json" */
@@ -103,7 +110,7 @@ export function mergeScripts(existing: SavedScript[], incoming: SavedScript[]): 
       const cur = list[sameId];
       if (cur.raw === s.raw && cur.title === s.title) skipped++;
       else if (s.updatedAt > cur.updatedAt) {
-        list[sameId] = s;
+        list[sameId] = { ...cur, ...s }; // newer content, same practice history
         updated++;
       } else skipped++;
       continue;

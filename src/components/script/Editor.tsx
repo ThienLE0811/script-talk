@@ -390,6 +390,7 @@ function SavedList({
                   <span className={cn("w-full truncate text-sm", active && "font-medium")}>{item.title}</span>
                   <span className="w-full truncate text-xs text-muted-foreground">
                     {lines} câu
+                    {!!item.practiceCount && ` · đã luyện ${item.practiceCount} lần`}
                     {speakers.length > 0 && ` · ${speakers.join(", ")}`} · {relativeDay(item.updatedAt)}
                   </span>
                 </button>

@@ -10,6 +10,7 @@ import {
   NotebookPenIcon,
   PauseIcon,
   PlayIcon,
+  RepeatIcon,
   RotateCcwIcon,
   SkipForwardIcon,
   SquareIcon,
@@ -46,6 +47,10 @@ type Props = {
   onExit: () => void;
   /** Start a new session with only these learner lines (indexes into script.lines). */
   onRetryLines?: (lineIndexes: number[]) => void;
+  /** Called once each time the learner finishes the dialogue having answered at least one line. */
+  onComplete?: () => void;
+  /** How many times this saved script has been completed (shown on the result card). */
+  practiceCount?: number;
 };
 
 export default function Practice({
@@ -56,6 +61,8 @@ export default function Practice({
   recSupported,
   onExit,
   onRetryLines,
+  onComplete,
+  practiceCount,
 }: Props) {
   const lines = script.lines;
   const [idx, setIdx] = useState(0);
@@ -228,6 +235,13 @@ export default function Practice({
   const myTotal = lines.filter((_, i) => isMine(i)).length;
   const failed = phase === "done" ? failedLineIndexes(script, myRoles, results, settings.threshold) : [];
 
+  // Count a finished run once (phase only becomes "done" once per run; "Luyện lại cả bài" starts a new
+  // run). Skipping through every line without speaking is not counted.
+  useEffect(() => {
+    if (phase === "done" && scored.length > 0) onComplete?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the transition to "done" only
+  }, [phase]);
+
   const [bookState, setBookState] = useState<"idle" | "saving" | "saved">("idle");
   const saveFailedToPhrasebook = async (lineIndexes: number[]) => {
     setBookState("saving");
@@ -384,6 +398,11 @@ export default function Practice({
                 {failed.length > 0
                   ? `Còn ${failed.length} câu chưa đạt ${settings.threshold}%.`
                   : "Tất cả các câu đều đạt!"}
+                {!!practiceCount && (
+                  <p className="mt-1.5 inline-flex items-center gap-1.5 font-medium text-foreground">
+                    <RepeatIcon className="size-4 text-primary" /> Bạn đã luyện bài này {practiceCount} lần
+                  </p>
+                )}
               </CardContent>
               <CardFooter className="flex-wrap justify-center gap-3">
                 {failed.length > 0 && onRetryLines && (

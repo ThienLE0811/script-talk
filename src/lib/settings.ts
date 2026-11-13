@@ -20,7 +20,15 @@ export const DEFAULT_SETTINGS: Settings = {
   autoAdvance: true,
 };
 
-export type SavedScript = { id: string; title: string; raw: string; updatedAt: number };
+export type SavedScript = {
+  id: string;
+  title: string;
+  raw: string;
+  updatedAt: number;
+  /** Completed full practice runs (counted on the server; not part of the backup file). */
+  practiceCount?: number;
+  lastPracticedAt?: number;
+};
 
 /** Every localStorage key the app uses. Changing a value's shape needs a migration. */
 export const STORAGE_KEYS = {

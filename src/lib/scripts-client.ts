@@ -12,6 +12,10 @@ export const createScript = (title: string, raw: string) =>
 export const updateScript = (id: string, title: string, raw: string) =>
   requestJSON<SavedScript>("PUT", `/api/scripts/${encodeURIComponent(id)}`, { title, raw });
 
+/** Count one completed practice run of a saved script → the updated SavedScript. */
+export const recordScriptPractice = (id: string) =>
+  requestJSON<SavedScript>("POST", `/api/scripts/${encodeURIComponent(id)}/practice`);
+
 export const deleteScript = (id: string) =>
   requestJSON<{ ok: true }>("DELETE", `/api/scripts/${encodeURIComponent(id)}`);
 

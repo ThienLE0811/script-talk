@@ -4,7 +4,15 @@ import { mergeScripts, newScriptId } from "@/lib/backup";
 import type { SavedScript } from "@/lib/settings";
 
 /** Stored document. `_id` is the app's script id (string), so ids stay stable across export/import. */
-type ScriptDoc = { _id: string; title: string; raw: string; createdAt: number; updatedAt: number };
+type ScriptDoc = {
+  _id: string;
+  title: string;
+  raw: string;
+  createdAt: number;
+  updatedAt: number;
+  practiceCount?: number;
+  lastPracticedAt?: number;
+};
 
 export const MAX_TITLE_LENGTH = 120;
 export const MAX_RAW_LENGTH = 100_000;
@@ -22,7 +30,13 @@ async function scripts(db: Db): Promise<Collection<ScriptDoc>> {
   return col;
 }
 
-const toScript = (d: ScriptDoc): SavedScript => ({ id: d._id, title: d.title, raw: d.raw, updatedAt: d.updatedAt });
+const toScript = (d: ScriptDoc): SavedScript => ({
+  id: d._id,
+  title: d.title,
+  raw: d.raw,
+  updatedAt: d.updatedAt,
+  ...(d.practiceCount ? { practiceCount: d.practiceCount, lastPracticedAt: d.lastPracticedAt } : {}),
+});
 
 /** Validate a { title, raw } payload. Returns null when unusable. */
 export function readScriptInput(body: unknown): { title: string; raw: string } | null {
@@ -49,6 +63,19 @@ export async function updateScript(db: Db, id: string, input: { title: string; r
   const doc = await (await scripts(db)).findOneAndUpdate(
     { _id: id },
     { $set: { title: input.title, raw: input.raw, updatedAt: Date.now() } },
+    { returnDocument: "after" },
+  );
+  return doc ? toScript(doc) : null;
+}
+
+/**
+ * Count one completed practice run. Leaves `updatedAt` alone: practising is not editing,
+ * so the saved list keeps its order.
+ */
+export async function recordPractice(db: Db, id: string): Promise<SavedScript | null> {
+  const doc = await (await scripts(db)).findOneAndUpdate(
+    { _id: id },
+    { $inc: { practiceCount: 1 }, $set: { lastPracticedAt: Date.now() } },
     { returnDocument: "after" },
   );
   return doc ? toScript(doc) : null;

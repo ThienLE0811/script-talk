@@ -25,6 +25,7 @@ import {
   deleteScript,
   fetchScripts,
   importScripts,
+  recordScriptPractice,
   updateScript,
   type ImportSummary,
 } from "@/lib/scripts-client";
@@ -248,6 +249,21 @@ export default function ScriptPractice() {
     });
   };
 
+  /**
+   * One finished run of the whole script: count it for the saved script being practised.
+   * Retrying only the missed lines is not a full run, and unsaved drafts have nothing to count on.
+   */
+  const savedPracticed = practiceScript === parsed && currentId ? saved.find((s) => s.id === currentId) : undefined;
+  const onPracticeComplete = async () => {
+    if (!savedPracticed) return;
+    try {
+      const updated = await recordScriptPractice(savedPracticed.id);
+      setSaved((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (err) {
+      if (errorCode(err) !== "not_found") showError("Chưa ghi được số lần luyện", err);
+    }
+  };
+
   if (mode === "practice" && practiceScript) {
     return (
       <Practice
@@ -257,6 +273,8 @@ export default function ScriptPractice() {
         settings={settings}
         voiceFor={voiceFor}
         recSupported={!!recSupported}
+        onComplete={savedPracticed ? () => void onPracticeComplete() : undefined}
+        practiceCount={savedPracticed?.practiceCount}
         onExit={() => switchMode("edit")}
         onRetryLines={(lineIndexes) => {
           setPracticeScript(buildRetryScript(practiceScript, myRoles, lineIndexes));
