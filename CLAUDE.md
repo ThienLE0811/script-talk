@@ -183,6 +183,60 @@ Phím tắt **không được kích hoạt khi đang gõ** trong ô soạn kịc
 - Đọc/ghi `localStorage` bọc trong `try/catch`, có giá trị mặc định khi dữ liệu hỏng hoặc thiếu. Đổi cấu trúc dữ liệu lưu thì cần migration.
 - Giao diện và thông báo cho người dùng viết bằng tiếng Việt. Nội dung luyện tập là tiếng Anh (`lang = "en-US"`).
 
+## Tổ chức code và kích thước file
+
+Nguyên tắc chung: SOLID (nhất là một file / một module một trách nhiệm chính), Clean Code, tách bạch trách nhiệm, gắn kết cao và phụ thuộc thấp. Ưu tiên dễ đọc, dễ bảo trì; không trừu tượng hoá thừa, không áp SOLID khi nó chỉ làm code phức tạp hơn. Giữ kiến trúc và quy ước sẵn có của dự án. Không refactor chỉ để giảm số dòng.
+
+### Kích thước file (hướng dẫn, không phải giới hạn cứng)
+
+| Loại file                                                 | Số dòng nên có |
+| --------------------------------------------------------- | -------------: |
+| `page.tsx`                                                |         50–150 |
+| `layout.tsx`                                              |         30–100 |
+| React component                                           |         50–200 |
+| Custom hook                                               |         30–150 |
+| Gọi API / truy cập dữ liệu (`*-client.ts`, `*.server.ts`) |         50–200 |
+| Logic thuần / helper trong `src/lib`                      |         20–100 |
+
+- Trên 200 dòng: xem lại có nên tách trách nhiệm không. Trên 300 dòng mà chứa nhiều trách nhiệm: ưu tiên tách khi sửa tới.
+- Một file 300 dòng gắn kết vẫn tốt hơn nhiều file vụn. Không tách nếu tách xong khó hiểu hoặc khó bảo trì hơn.
+- Một số file hiện đã vượt mức (`Conversation.tsx`, `Practice.tsx`, `ScriptPractice.tsx`…). Chỉ tách khi được yêu cầu, hoặc khi đang sửa đúng phần đó và việc tách giúp rõ ràng hơn; đề xuất kế hoạch trước khi tách.
+
+### Đặt code ở đâu
+
+- **Component** (`src/components/<tính năng>/`): hiển thị UI. Không dồn gọi API, logic nghiệp vụ phức tạp, quản lý state và UI lớn vào cùng một component.
+- **Page** (`src/app/**/page.tsx`): ghép trang, metadata, việc của route; mỏng nhất có thể.
+- **Custom hook** (`src/hooks/` hoặc cạnh tính năng, như `useEnglishVoices`, `useViTranslations`): state, vòng đời React, hành vi phía client dùng lại được; mỗi hook một việc.
+- **Gọi API / dữ liệu:** client gọi API của app qua `src/lib/*-client.ts`; truy cập MongoDB và Gemini chỉ ở `*.server.ts`.
+- **Logic thuần** (`src/lib/`): hàm thuần, không phụ thuộc DOM / Web Speech API / React, dễ viết unit test (parser, chấm điểm, lịch ôn, thống kê, prompt).
+- **Kiểu dữ liệu và hằng số:** đặt cạnh logic sở hữu chúng (ví dụ `ChatSession` trong `src/lib/chat/history.ts`); kiểu dùng chung giữa nhiều nơi thì không khai báo lặp lại.
+
+### Next.js, React, TypeScript
+
+- Giữ ranh giới Server / Client Component. Chỉ thêm `"use client"` khi cần tính năng phía client; mặc định ưu tiên Server Component, không chuyển sang Client Component khi không cần.
+- Component riêng của một route đặt gần route / tính năng đó; chỉ tách thành component dùng chung khi thật sự dùng lại hoặc tách giúp rõ trách nhiệm.
+- Tránh truyền props qua nhiều tầng; chỉ dùng Context hay thư viện state khi thật cần.
+- Không thêm `useEffect`, `useMemo`, `useCallback` khi không cần.
+- TypeScript strict. Kiểu rõ ràng cho dữ liệu trao đổi (API, DB, `localStorage`). Không dùng `any`; dữ liệu chưa rõ kiểu thì dùng `unknown` rồi kiểm tra (như các hàm `read…` / `parse…`). Hạn chế ép kiểu (`as`) không an toàn.
+
+### Khi refactor
+
+Trước: đọc hiểu code và cấu trúc hiện có, chỉ ra file quá nhiều trách nhiệm, code lặp, phụ thuộc thừa; **đề xuất kế hoạch trước khi đổi cấu trúc**.
+
+Trong lúc làm:
+
+- Giữ nguyên hành vi, logic nghiệp vụ, hợp đồng API, cấu trúc dữ liệu (DB, `localStorage`, định dạng kịch bản, file Xuất) và UI/UX, trừ khi được yêu cầu khác.
+- Giữ quy ước đặt tên. Cập nhật import/export sau khi di chuyển code. Không để lại hai bản cài đặt trùng nhau.
+- Không tạo component / hook / module thừa. Thay đổi nhỏ, từng bước. Refactor là commit riêng, không gộp với sửa lỗi hay tính năng.
+
+Khi chưa được yêu cầu: không cài thêm package, không sửa `package.json`, không đổi hợp đồng API, không sửa file không liên quan (trừ cập nhật CLAUDE.md / README cho đúng), không viết lại code đang chạy tốt khi không có lý do rõ, không đưa vào mẫu kiến trúc mới khi chưa đánh giá kiến trúc hiện có.
+
+Sau khi làm: `npx tsc --noEmit`, `npm run lint`, và `npm run build` khi được (dừng dev server trước); kiểm tra đường dẫn import và phụ thuộc vòng; đảm bảo chức năng cũ không đổi; báo lại lỗi nào chưa xử lý được.
+
+Báo cáo sau refactor: tóm tắt thay đổi; danh sách file tạo / sửa / xoá; số dòng trước và sau của các file thay đổi nhiều; trách nhiệm đã được tách thế nào; kết quả tsc, lint, build; vấn đề còn lại hoặc gợi ý cải thiện.
+
+Nguyên tắc cuối: ưu tiên kiến trúc đơn giản, gắn kết, dễ bảo trì hơn là con số dòng. Mỗi file và module phải có mục đích rõ ràng; chỉ refactor khi thật sự cải thiện độ dễ đọc, dễ bảo trì hoặc dễ mở rộng.
+
 ## Quy ước commit
 
 - **Chỉ commit hoặc push khi được yêu cầu.** Không tự `git push --force` và không sửa lịch sử đã push.
