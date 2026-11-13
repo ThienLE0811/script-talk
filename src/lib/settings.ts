@@ -100,9 +100,12 @@ export function saveJSON(key: string, value: unknown) {
   }
 }
 
-/** Make the script editor open `script` next time it mounts, with `myRole` as the learner's role. */
-export function queueScriptForPractice(script: SavedScript, myRole: string) {
-  saveJSON(STORAGE_KEYS.draft, { raw: script.raw, currentId: script.id } satisfies Draft);
+/**
+ * Prepare to practise a saved script with `myRole` as the learner's role, and return the URL of its
+ * practice set-up screen. The editor draft is left alone so unsaved work is never overwritten.
+ */
+export function queueScriptForPractice(script: SavedScript, myRole: string): string {
   const settings = loadJSON(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
   saveJSON(STORAGE_KEYS.settings, { ...settings, myRoles: [myRole] });
+  return `/script?id=${encodeURIComponent(script.id)}`;
 }

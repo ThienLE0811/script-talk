@@ -284,7 +284,7 @@ export default function Practice({
         {/* Top bar */}
         <div className="mb-3 flex items-center justify-between gap-3">
           <Button variant="ghost" size="sm" onClick={onExit}>
-            <ArrowLeftIcon /> Kịch bản
+            <ArrowLeftIcon /> Quay lại
           </Button>
           <div className="min-w-0 truncate text-sm font-medium">{script.title || "Hội thoại"}</div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -449,7 +449,7 @@ export default function Practice({
                   <RotateCcwIcon /> Luyện lại cả bài
                 </Button>
                 <Button variant="outline" onClick={onExit}>
-                  Sửa kịch bản
+                  Đổi vai / cài đặt
                 </Button>
                 {failed.length > 0 && (
                   <Button

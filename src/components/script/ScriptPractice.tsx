@@ -1,10 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import Editor from "./Editor";
 import GenerateScriptDialog from "./GenerateScriptDialog";
 import Practice from "./Practice";
+import PracticeSetup from "./PracticeSetup";
+import ScriptLibrary from "./ScriptLibrary";
 import { aiErrorText, AiRequestError } from "@/lib/ai-errors";
 import { backupFileName, buildBackup, MAX_IMPORT_BYTES, parseBackup } from "@/lib/backup";
 import { parseScript, SAMPLE_SCRIPT, type ParsedScript } from "@/lib/script";
@@ -29,7 +44,7 @@ import {
   updateScript,
   type ImportSummary,
 } from "@/lib/scripts-client";
-import { isRecognitionSupported, stopSpeaking, useEnglishVoices } from "@/lib/speech";
+import { isRecognitionSupported, useEnglishVoices } from "@/lib/speech";
 
 const K_DRAFT = STORAGE_KEYS.draft;
 const K_SETTINGS = STORAGE_KEYS.settings;
@@ -38,20 +53,52 @@ const K_LEGACY_SAVED = STORAGE_KEYS.saved;
 
 export type SavedStatus = { state: "loading" } | { state: "ready" } | { state: "error"; code: string };
 
-/** The "practice from your own script" mode: editor + spoken dialogue practice. */
+/**
+ * Which screen is shown. It lives in the URL so the browser's Back button moves between screens:
+ * /script (library), /script?edit (editor), /script?id=<id> (set-up), /script?id=<id>&play (practice).
+ * `id` is a saved script id, or DRAFT_ID for the unsaved script in the editor.
+ */
+type Route =
+  | { view: "library" }
+  | { view: "edit" }
+  | { view: "setup"; id: string }
+  | { view: "practice"; id: string };
+
+const DRAFT_ID = "draft";
+const NEW_SCRIPT = "# \nA: \nB: \n";
+
+function parseRoute(params: { get(key: string): string | null; has(key: string): boolean }): Route {
+  if (params.has("edit")) return { view: "edit" };
+  const id = params.get("id");
+  if (!id) return { view: "library" };
+  return params.has("play") ? { view: "practice", id } : { view: "setup", id };
+}
+
+function routeHref(r: Route): string {
+  if (r.view === "edit") return "/script?edit";
+  if (r.view === "setup") return `/script?id=${encodeURIComponent(r.id)}`;
+  if (r.view === "practice") return `/script?id=${encodeURIComponent(r.id)}&play`;
+  return "/script";
+}
+
+/** A running practice session: the whole script, or a subset when retrying missed lines. */
+type Session = { id: string; script: ParsedScript; full: boolean; key: number };
+
+/** The "practice from your own script" mode: library → set-up → spoken dialogue practice, plus the editor. */
 export default function ScriptPractice() {
+  const route = parseRoute(useSearchParams());
+  // The editor's working copy (kept in localStorage as the draft).
   const [raw, setRaw] = useState(SAMPLE_SCRIPT);
+  const [currentId, setCurrentId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [saved, setSaved] = useState<SavedScript[]>([]);
   const [savedStatus, setSavedStatus] = useState<SavedStatus>({ state: "loading" });
   const [localOnly, setLocalOnly] = useState<SavedScript[]>([]);
   const [busy, setBusy] = useState(false);
-  const [currentId, setCurrentId] = useState<string | null>(null);
-  const [mode, setMode] = useState<"edit" | "practice">("edit");
-  // The script being practised: the whole script, or a subset when retrying missed lines.
-  const [practiceScript, setPracticeScript] = useState<ParsedScript | null>(null);
-  const [practiceKey, setPracticeKey] = useState(0);
+  const [session, setSession] = useState<Session | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
+  // Action waiting for "discard the unsaved draft?" confirmation.
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
   const [recSupported, setRecSupported] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
   const voices = useEnglishVoices();
@@ -75,21 +122,87 @@ export default function ScriptPractice() {
     if (loaded) saveJSON(K_SETTINGS, settings);
   }, [settings, loaded]);
 
-  const parsed = useMemo(() => parseScript(raw), [raw]);
+  /* ---------- Navigation ---------- */
+
+  // In-app history entries we pushed and the user has not gone back from yet.
+  const pushedRef = useRef(0);
+  useEffect(() => {
+    const onPop = () => {
+      pushedRef.current = Math.max(0, pushedRef.current - 1);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const navigate = (r: Route, replace = false) => {
+    if (replace) {
+      window.history.replaceState(null, "", routeHref(r));
+    } else {
+      window.history.pushState(null, "", routeHref(r));
+      pushedRef.current++;
+    }
+    window.scrollTo({ top: 0 });
+  };
+  /** Back to the previous screen of this mode, or to `fallback` when the user arrived here directly. */
+  const goBack = (fallback: Route) => {
+    if (pushedRef.current > 0) window.history.back();
+    else navigate(fallback, true);
+  };
+
+  // A practice URL without a running session (page reload, old history entry): show the set-up instead.
+  const stalePracticeId = route.view === "practice" && session?.id !== route.id ? route.id : null;
+  useEffect(() => {
+    if (stalePracticeId) window.history.replaceState(null, "", routeHref({ view: "setup", id: stalePracticeId }));
+  }, [stalePracticeId]);
+
+  /* ---------- Draft (editor) ---------- */
+
+  const ready = savedStatus.state === "ready";
+  const draftParsed = useMemo(() => parseScript(raw), [raw]);
+  const draftSaved = currentId ? saved.find((s) => s.id === currentId) : undefined;
+  // Unsaved work: edits to a saved script (or one deleted elsewhere), or new non-empty content.
+  const draftDirty = currentId
+    ? ready && draftSaved?.raw !== raw
+    : raw.trim() !== "" && raw !== SAMPLE_SCRIPT && raw !== NEW_SCRIPT;
+  const draftTitle = draftParsed.title || draftParsed.lines[0]?.text.slice(0, 40) || "Kịch bản chưa có tiêu đề";
+
+  /** Run `action`, first asking to discard the unsaved draft if there is one. */
+  const guardDraft = (action: () => void) => {
+    if (draftDirty) setPendingDiscard(() => action);
+    else action();
+  };
+
+  /** Open the editor on `target` (a saved script, a new script or the sample). */
+  const editScript = (target: { raw: string; id: string | null }) => {
+    // Same script as the draft: continue the draft, keeping its unsaved edits.
+    if (target.id && target.id === currentId) return navigate({ view: "edit" });
+    guardDraft(() => {
+      setRaw(target.raw);
+      setCurrentId(target.id);
+      navigate({ view: "edit" });
+    });
+  };
+
+  /* ---------- Script being set up / practised ---------- */
+
+  const activeId = route.view === "setup" || route.view === "practice" ? route.id : null;
+  const activeSaved = activeId && activeId !== DRAFT_ID ? saved.find((s) => s.id === activeId) : undefined;
+  const activeRaw = activeId === DRAFT_ID ? raw : (activeSaved?.raw ?? "");
+  const activeParsed = useMemo(() => parseScript(activeRaw), [activeRaw]);
 
   const myRoles = useMemo(() => {
-    const valid = settings.myRoles.filter((r) => parsed.speakers.includes(r));
+    const valid = settings.myRoles.filter((r) => activeParsed.speakers.includes(r));
     if (valid.length) return valid;
-    const fallback = parsed.speakers[1] ?? parsed.speakers[0];
+    const fallback = activeParsed.speakers[1] ?? activeParsed.speakers[0];
     return fallback ? [fallback] : [];
-  }, [settings.myRoles, parsed.speakers]);
+  }, [settings.myRoles, activeParsed.speakers]);
 
   // Pick a voice per machine speaker: the saved choice, or a different good voice for each.
   const voiceFor = (speaker: string): string | undefined => {
     const chosen = settings.voices[speaker];
     if (chosen && voices.some((v) => v.voiceURI === chosen)) return chosen;
     if (!voices.length) return undefined;
-    const machine = parsed.speakers.filter((s) => !myRoles.includes(s));
+    const machine = activeParsed.speakers.filter((s) => !myRoles.includes(s));
     const k = Math.max(0, machine.indexOf(speaker));
     return voices[k % voices.length].voiceURI;
   };
@@ -128,7 +241,7 @@ export default function ScriptPractice() {
 
   const onSave = () =>
     withBusy(async () => {
-      const title = parsed.title || parsed.lines[0]?.text.slice(0, 40) || "Kịch bản";
+      const title = draftParsed.title || draftParsed.lines[0]?.text.slice(0, 40) || "Kịch bản";
       try {
         if (currentId && saved.some((s) => s.id === currentId)) {
           try {
@@ -233,27 +346,29 @@ export default function ScriptPractice() {
       }
     });
 
-  const switchMode = (next: "edit" | "practice") => {
-    if (next === "edit") stopSpeaking();
-    else setPracticeScript(parsed);
-    setMode(next);
-    window.scrollTo({ top: 0 });
-  };
-
   const onGenerated = (script: GeneratedScript) => {
     setRaw(script.raw);
     setCurrentId(null);
     setSettings((s) => ({ ...s, myRoles: [script.learnerRole] }));
+    if (route.view !== "edit") navigate({ view: "edit" });
     toast.success("AI đã viết xong kịch bản", {
-      description: `${script.title} · bạn đóng vai ${script.learnerRole}. Bấm “Lưu kịch bản” nếu muốn giữ lại.`,
+      description: `${script.title} · bạn đóng vai ${script.learnerRole}. Bấm “Lưu” nếu muốn giữ lại.`,
     });
+  };
+
+  /* ---------- Practice ---------- */
+
+  const startPractice = () => {
+    if (!activeId) return;
+    setSession((s) => ({ id: activeId, script: activeParsed, full: true, key: (s?.key ?? 0) + 1 }));
+    navigate({ view: "practice", id: activeId });
   };
 
   /**
    * One finished run of the whole script: count it for the saved script being practised.
    * Retrying only the missed lines is not a full run, and unsaved drafts have nothing to count on.
    */
-  const savedPracticed = practiceScript === parsed && currentId ? saved.find((s) => s.id === currentId) : undefined;
+  const savedPracticed = session?.full && session.id !== DRAFT_ID ? saved.find((s) => s.id === session.id) : undefined;
   const onPracticeComplete = async () => {
     if (!savedPracticed) return;
     try {
@@ -264,11 +379,46 @@ export default function ScriptPractice() {
     }
   };
 
-  if (mode === "practice" && practiceScript) {
+  /* ---------- Screens ---------- */
+
+  const generateDialog = (
+    <GenerateScriptDialog
+      open={generateOpen}
+      onOpenChange={setGenerateOpen}
+      willReplace={draftDirty}
+      onGenerated={onGenerated}
+    />
+  );
+  const discardDialog = (
+    <AlertDialog open={pendingDiscard !== null} onOpenChange={(open) => !open && setPendingDiscard(null)}>
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Bỏ bản nháp chưa lưu?</AlertDialogTitle>
+          <AlertDialogDescription>
+            “{draftTitle}” có thay đổi chưa lưu. Tiếp tục thì những thay đổi đó sẽ mất.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Huỷ</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => {
+              pendingDiscard?.();
+              setPendingDiscard(null);
+            }}
+          >
+            Bỏ bản nháp
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
+  if (route.view === "practice" && session?.id === route.id) {
     return (
       <Practice
-        key={practiceKey}
-        script={practiceScript}
+        key={session.key}
+        script={session.script}
         myRoles={myRoles}
         settings={settings}
         voiceFor={voiceFor}
@@ -276,63 +426,123 @@ export default function ScriptPractice() {
         onComplete={savedPracticed ? () => void onPracticeComplete() : undefined}
         practiceCount={savedPracticed?.practiceCount}
         onToggleTranslation={() => setSettings((s) => ({ ...s, showTranslation: !s.showTranslation }))}
-        onExit={() => switchMode("edit")}
+        onExit={() => goBack({ view: "setup", id: session.id })}
         onRetryLines={(lineIndexes) => {
-          setPracticeScript(buildRetryScript(practiceScript, myRoles, lineIndexes));
-          setPracticeKey((k) => k + 1); // remount Practice for a fresh session
+          setSession({
+            ...session,
+            script: buildRetryScript(session.script, myRoles, lineIndexes),
+            full: false,
+            key: session.key + 1, // remount Practice for a fresh session
+          });
           window.scrollTo({ top: 0 });
         }}
       />
     );
   }
 
-  return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Luyện theo kịch bản</h1>
-        <p className="text-sm text-muted-foreground">
-          Viết kịch bản, chọn vai của bạn. Máy đọc các vai còn lại, bạn nói phần của mình và được chấm từng từ.
-        </p>
-      </div>
-
-      <Editor
-        raw={raw}
-        onRawChange={setRaw}
-        parsed={parsed}
+  if (route.view === "setup" || route.view === "practice") {
+    const id = route.id;
+    const isDraft = id === DRAFT_ID;
+    if (!isDraft && !activeSaved) {
+      return (
+        <div className="mx-auto flex w-full max-w-md flex-col items-center gap-3 px-4 py-16 text-center text-sm">
+          {savedStatus.state === "loading" ? (
+            <p className="flex items-center gap-2 text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" /> Đang tải kịch bản…
+            </p>
+          ) : (
+            <>
+              <p className="flex gap-2 text-destructive">
+                <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                {savedStatus.state === "error"
+                  ? aiErrorText(savedStatus.code)
+                  : "Không tìm thấy kịch bản này. Có thể nó đã bị xoá."}
+              </p>
+              <div className="flex gap-2">
+                {savedStatus.state === "error" && (
+                  <Button variant="outline" onClick={() => void refreshSaved()}>
+                    Thử lại
+                  </Button>
+                )}
+                <Button onClick={() => navigate({ view: "library" }, true)}>Về thư viện</Button>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+    return (
+      <>
+        <PracticeSetup
+        title={isDraft ? draftTitle : (activeSaved?.title ?? "")}
+        isDraft={isDraft}
+        practiceCount={activeSaved?.practiceCount}
+        parsed={activeParsed}
         myRoles={myRoles}
         settings={settings}
         onSettingsChange={setSettings}
         voices={voices}
         voiceFor={voiceFor}
+        recSupported={recSupported}
+        onStart={startPractice}
+        onBack={() => goBack({ view: "library" })}
+        onEdit={() =>
+          isDraft ? navigate({ view: "edit" }) : activeSaved && editScript({ raw: activeSaved.raw, id: activeSaved.id })
+        }
+        />
+        {discardDialog}
+      </>
+    );
+  }
+
+  if (route.view === "edit") {
+    return (
+      <>
+        <Editor
+          raw={raw}
+          onRawChange={setRaw}
+          parsed={draftParsed}
+          isNew={!currentId}
+          dirty={draftDirty}
+          canSave={ready && !busy && draftParsed.lines.length > 0}
+          onSave={() => void onSave()}
+          onPractice={() => navigate({ view: "setup", id: currentId && !draftDirty ? currentId : DRAFT_ID })}
+          onBack={() => goBack({ view: "library" })}
+          onOpenGenerate={() => setGenerateOpen(true)}
+        />
+        {generateDialog}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ScriptLibrary
         saved={saved}
         savedStatus={savedStatus}
         onRetryLoad={() => void refreshSaved()}
         localOnlyCount={localOnly.length}
         onMigrateLocal={() => void onMigrateLocal()}
         busy={busy}
-        currentId={currentId}
-        onSave={() => void onSave()}
-        onExport={onExport}
-        onImport={(file) => void onImport(file)}
-        onLoad={(s) => {
-          setRaw(s.raw);
-          setCurrentId(s.id);
-        }}
-        onDelete={(id) => void onDelete(id)}
-        onNew={() => {
-          setRaw("# \nA: \nB: \n");
+        sort={settings.savedSort}
+        onSortChange={(savedSort) => setSettings((s) => ({ ...s, savedSort }))}
+        draft={loaded && draftDirty ? { title: draftTitle } : null}
+        onContinueDraft={() => navigate({ view: "edit" })}
+        onDiscardDraft={() => {
+          setRaw("");
           setCurrentId(null);
         }}
-        onStart={() => switchMode("practice")}
+        onOpen={(id) => navigate({ view: "setup", id })}
+        onEdit={(s) => editScript({ raw: s.raw, id: s.id })}
+        onDelete={(id) => void onDelete(id)}
+        onNew={() => editScript({ raw: NEW_SCRIPT, id: null })}
+        onOpenSample={() => editScript({ raw: SAMPLE_SCRIPT, id: null })}
         onOpenGenerate={() => setGenerateOpen(true)}
-        recSupported={recSupported}
+        onExport={onExport}
+        onImport={(file) => void onImport(file)}
       />
-      <GenerateScriptDialog
-        open={generateOpen}
-        onOpenChange={setGenerateOpen}
-        willReplace={raw.trim().length > 0 && raw !== SAMPLE_SCRIPT}
-        onGenerated={onGenerated}
-      />
-    </div>
+      {generateDialog}
+      {discardDialog}
+    </>
   );
 }

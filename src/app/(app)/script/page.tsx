@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import ScriptPractice from "@/components/script/ScriptPractice";
 
 export const metadata: Metadata = {
@@ -6,5 +7,10 @@ export const metadata: Metadata = {
 };
 
 export default function ScriptPage() {
-  return <ScriptPractice />;
+  // ScriptPractice reads the screen from the URL (useSearchParams), which needs a Suspense boundary.
+  return (
+    <Suspense>
+      <ScriptPractice />
+    </Suspense>
+  );
 }

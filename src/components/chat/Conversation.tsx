@@ -467,7 +467,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
       if (!aliveRef.current) return;
       setSavedScript({ script, turnCount: list.length });
       toast.success("Đã lưu thành kịch bản", {
-        description: "Xem trong mục “Đã lưu” ở chế độ Luyện theo kịch bản.",
+        description: "Xem trong thư viện của chế độ Luyện theo kịch bản.",
         action: { label: "Luyện ngay", onClick: () => practiceScript(script) },
       });
     } catch (err) {
@@ -480,8 +480,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
   };
 
   const practiceScript = (script: SavedScript) => {
-    queueScriptForPractice(script, CHAT_SCRIPT_ME);
-    router.push("/script");
+    router.push(queueScriptForPractice(script, CHAT_SCRIPT_ME));
   };
 
   const playOnce = (text: string) => {

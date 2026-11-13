@@ -24,7 +24,7 @@ Claude không dùng được micro, nên skill này có hai phần: **Claude t�
 
 **SSR và hỗ trợ trình duyệt**:
 - `window`, `speechSynthesis`, `localStorage` chỉ được truy cập trong `useEffect` hoặc handler, không ở top-level module hay khi render.
-- Trình duyệt không hỗ trợ (`isRecognitionSupported()` = false) vẫn dùng được: `Editor.tsx` hiện thông báo tiếng Việt, `Practice.tsx` chuyển sang ô gõ câu trả lời.
+- Trình duyệt không hỗ trợ (`isRecognitionSupported()` = false) vẫn dùng được: `PracticeSetup.tsx` hiện thông báo tiếng Việt, `Practice.tsx` chuyển sang ô gõ câu trả lời.
 
 **Lỗi recognition**: có thông báo tiếng Việt rõ ràng cho `not-allowed` / `service-not-allowed`, `network`, `no-speech`; `aborted` (do chính app huỷ) không hiện lỗi.
 

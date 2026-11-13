@@ -50,7 +50,7 @@ Luôn `git add <đường dẫn cụ thể>`, không dùng `git add -A` hay `git
 | `speech` | `src/lib/speech.ts`, luồng nói/nghe trong `Practice.tsx` |
 | `storage` | `src/lib/settings.ts`, khoá `localStorage` |
 | `shortcuts` | Bộ xử lý phím trong `Practice.tsx` |
-| `ui` | `Editor.tsx`, `Practice.tsx` (giao diện), `page.tsx`, `globals.css`, `src/components/ui/` |
+| `ui` | `ScriptLibrary.tsx`, `PracticeSetup.tsx`, `Editor.tsx`, `Practice.tsx` (giao diện), `page.tsx`, `globals.css`, `src/components/ui/` |
 
   Bỏ scope nếu thay đổi trải rộng nhiều vùng. `CLAUDE.md`, `README.md`, file trong `.claude/` dùng `docs` hoặc `chore`.
 - Mô tả: tiếng Anh, thể mệnh lệnh, viết thường, không chấm cuối, ≤ ~72 ký tự.
