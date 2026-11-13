@@ -30,7 +30,9 @@ import type { Mission } from "@/lib/chat/mission";
 import { LEVELS, TOPICS, CUSTOM_TOPIC_ID, type ChatRole, type ChatTurn, type Feedback } from "@/lib/chat/prompts";
 import { CHAT_SCRIPT_ME, chatToScript, type ChatSummary, type Correction } from "@/lib/chat/summary";
 import { saveChat, saveChatOnExit } from "@/lib/chats-client";
+import { REVIEW_PASS_SCORE } from "@/lib/phrasebook";
 import { addPhrases } from "@/lib/phrases-client";
+import { compareLine, type WordMark } from "@/lib/script";
 import { createScript } from "@/lib/scripts-client";
 import { queueScriptForPractice, type SavedScript } from "@/lib/settings";
 import { speak, startListening, stopSpeaking, type ListenController } from "@/lib/speech";
@@ -57,7 +59,13 @@ type UiTurn = {
   /** Vietnamese translation of a partner line, fetched on demand. */
   translation?: TranslationState;
   showTranslation?: boolean;
+  /** Last attempt at saying the corrected sentence again (practice only, not saved). */
+  retry?: RetryResult;
 };
+type RetryResult = { attempts: number } & (
+  | { status: "done"; spoken: string; score: number; words: WordMark[] }
+  | { status: "silent"; message: string }
+);
 type Phase = "thinking" | "speaking" | "listening" | "waiting" | "paused" | "error" | "summary";
 
 const toHistory = (turns: UiTurn[]): ChatTurn[] =>
@@ -101,6 +109,9 @@ export default function Conversation({ settings, voiceURI, recSupported, session
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const [suggest, setSuggest] = useState<SuggestState | null>(null);
+  // Saying a corrected sentence again: which user turn, and what the mic hears so far.
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+  const [retryInterim, setRetryInterim] = useState("");
 
   // turnsRef mirrors state so async callbacks always see the latest list.
   const turnsRef = useRef<UiTurn[]>(turns);
@@ -139,6 +150,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     replyAbortRef.current?.abort();
     replyAbortRef.current = null;
     stopSpeaking();
+    setRetryingId(null);
     if (turnsRef.current.some((t) => t.streaming)) commit(turnsRef.current.filter((t) => !t.streaming));
     return tokenRef.current;
   };
@@ -343,6 +355,56 @@ export default function Conversation({ settings, voiceURI, recSupported, session
       if (tokenRef.current === token && !stay) listen(token);
     });
   };
+
+  /* ---------- Say the corrected sentence again ---------- */
+
+  /** A correction can be practised when it is the learner's turn (the AI is not talking). */
+  const canRetry = recSupported && !replying && (phase === "listening" || phase === "waiting");
+
+  /**
+   * Listen to the learner saying the corrected sentence of turn `id` and score it word by word.
+   * Afterwards the mic stays off ("waiting"), so a further attempt is not sent to the AI as an answer.
+   */
+  const retryCorrection = (id: number) => {
+    const turn = turnsRef.current.find((t) => t.id === id);
+    if (!canRetry || turn?.feedback?.status !== "done" || turn.feedback.data.verdict === "good") return;
+    const target = turn.feedback.data.corrected;
+    const attempts = turn.retry?.attempts ?? 0;
+    const token = interrupt();
+    setRetryingId(id);
+    setRetryInterim("");
+    setInterim("");
+    setNotice("");
+    setPhase("listening");
+    recRef.current = startListening({
+      onInterim: (t) => {
+        if (tokenRef.current === token) setRetryInterim(t);
+      },
+      onDone: (text, error) => {
+        if (tokenRef.current !== token) return;
+        recRef.current = null;
+        setRetryingId(null);
+        if (text) {
+          const { score, words } = compareLine(target, text);
+          updateTurn(id, { retry: { status: "done", spoken: text, score, words, attempts: attempts + 1 } });
+        } else {
+          const message =
+            error === "not-allowed" || error === "service-not-allowed"
+              ? "Trình duyệt đang chặn micro."
+              : error === "network"
+                ? "Lỗi mạng: nhận giọng nói cần có Internet."
+                : "Chưa nghe thấy gì.";
+          updateTurn(id, { retry: { status: "silent", message, attempts } });
+        }
+        setPhase("waiting");
+      },
+    });
+  };
+
+  /** The latest correction in the conversation (shortcut R). */
+  const latestCorrectionId = [...turns]
+    .reverse()
+    .find((t) => t.role === "user" && t.feedback?.status === "done" && t.feedback.data.verdict !== "good")?.id;
 
   /* ---------- Help while talking: reply suggestions, translations ---------- */
 
@@ -617,6 +679,9 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     } else if (e.code === "KeyH" && myTurn && !showSuggest && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       void fetchSuggestions();
+    } else if (e.code === "KeyR" && canRetry && latestCorrectionId && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      retryCorrection(latestCorrectionId);
     } else if (e.code === "Escape" && phase !== "paused" && phase !== "summary") {
       pause();
     }
@@ -760,7 +825,17 @@ export default function Conversation({ settings, voiceURI, recSupported, session
                 <div className="rounded-2xl rounded-tr-sm border border-primary/20 bg-accent px-4 py-3 text-accent-foreground">
                   <p className="leading-relaxed">{turn.text}</p>
                 </div>
-                <FeedbackView feedback={turn.feedback} onPlay={replay} canPlay={!replying} />
+                <FeedbackView
+                  feedback={turn.feedback}
+                  onPlay={replay}
+                  canPlay={!replying}
+                  retry={turn.retry}
+                  retrying={retryingId === turn.id}
+                  retryInterim={retryInterim}
+                  canRetry={canRetry}
+                  showRetry={recSupported}
+                  onRetry={() => retryCorrection(turn.id)}
+                />
                 {turn.inPhrasebook && (
                   <p className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
                     <NotebookPenIcon className="size-3" /> Đã lưu vào sổ tay câu
@@ -770,7 +845,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
             ),
           )}
 
-          {phase === "listening" && (
+          {phase === "listening" && retryingId === null && (
             <p className="self-end px-1 text-sm text-muted-foreground italic">
               {interim ? `“${interim}”` : "Đang nghe…"}
             </p>
@@ -900,7 +975,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
             )}
           </div>
           <p className="text-center text-xs text-muted-foreground">
-            Space: nói / dừng · H: gợi ý · Esc: tạm dừng
+            Space: nói / dừng · H: gợi ý · R: nói lại câu vừa sửa · Esc: tạm dừng
           </p>
         </div>
       </div>
@@ -912,10 +987,24 @@ function FeedbackView({
   feedback,
   onPlay,
   canPlay,
+  retry,
+  retrying,
+  retryInterim,
+  canRetry,
+  showRetry,
+  onRetry,
 }: {
   feedback: FeedbackState | undefined;
   onPlay: (text: string) => void;
   canPlay: boolean;
+  retry: RetryResult | undefined;
+  /** The mic is listening for this correction right now. */
+  retrying: boolean;
+  retryInterim: string;
+  canRetry: boolean;
+  /** Speech recognition is available. */
+  showRetry: boolean;
+  onRetry: () => void;
 }) {
   if (!feedback) return null;
   if (feedback.status === "loading") {
@@ -948,15 +1037,85 @@ function FeedbackView({
       </p>
       <p className="font-medium">{corrected}</p>
       {explanation && <p className="mt-1 text-xs text-muted-foreground">{explanation}</p>}
-      <Button
-        variant="ghost"
-        size="xs"
-        className="-ml-2 mt-1 text-muted-foreground"
-        onClick={() => onPlay(corrected)}
-        disabled={!canPlay}
-      >
-        <Volume2Icon /> Nghe câu gợi ý
-      </Button>
+
+      {retrying ? (
+        <p className="mt-2 flex items-center gap-1.5 border-t border-foreground/10 pt-2 text-sm text-muted-foreground italic">
+          <MicIcon className="size-3.5 shrink-0 animate-pulse text-destructive" />
+          {retryInterim ? `“${retryInterim}”` : "Đang nghe bạn nói lại… (Space để dừng)"}
+        </p>
+      ) : (
+        retry && <RetryResultView retry={retry} />
+      )}
+
+      <div className="-ml-2 mt-1 flex flex-wrap gap-1">
+        <Button
+          variant="ghost"
+          size="xs"
+          className="text-muted-foreground"
+          onClick={() => onPlay(corrected)}
+          disabled={!canPlay}
+        >
+          <Volume2Icon /> Nghe câu gợi ý
+        </Button>
+        {showRetry && (
+          <Button
+            variant={retry?.status === "done" && retry.score >= REVIEW_PASS_SCORE ? "ghost" : "secondary"}
+            size="xs"
+            onClick={onRetry}
+            disabled={!canRetry || retrying}
+            title={canRetry ? "Nói lại câu đã sửa (R)" : "Đợi AI nói xong rồi nói lại"}
+          >
+            <MicIcon /> {retry ? "Nói lại lần nữa" : "Nói lại"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Score of the last "say it again" attempt, with each word marked like in script practice. */
+function RetryResultView({ retry }: { retry: RetryResult }) {
+  if (retry.status === "silent") {
+    return (
+      <p className="mt-2 border-t border-foreground/10 pt-2 text-xs text-amber-600 dark:text-amber-400">
+        {retry.message} Bấm “Nói lại” để thử lại.
+      </p>
+    );
+  }
+  const passed = retry.score >= REVIEW_PASS_SCORE;
+  return (
+    <div className="mt-2 border-t border-foreground/10 pt-2">
+      <p className="leading-relaxed">
+        {retry.words.map((w, k) => (
+          <span
+            key={k}
+            className={cn(
+              w.status === "ok" && "text-success",
+              w.status === "miss" &&
+                "rounded bg-destructive/10 text-destructive underline decoration-wavy decoration-destructive/60 underline-offset-4",
+              w.status === "neutral" && "text-muted-foreground",
+            )}
+          >
+            {w.text}{" "}
+          </span>
+        ))}
+      </p>
+      <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+        <span className="min-w-0 text-muted-foreground italic">Bạn nói: “{retry.spoken}”</span>
+        <Badge
+          className={cn(
+            "shrink-0 tabular-nums",
+            passed ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive",
+          )}
+        >
+          {passed && <CheckCircle2Icon />} {retry.score}%
+        </Badge>
+      </div>
+      {!passed && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Chưa đạt {REVIEW_PASS_SCORE}%. Nghe lại câu gợi ý rồi thử thêm lần nữa nhé.
+        </p>
+      )}
     </div>
   );
 }
