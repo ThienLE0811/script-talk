@@ -13,6 +13,8 @@ import {
   RotateCcwIcon,
   ScrollTextIcon,
   SparklesIcon,
+  TextIcon,
+  TimerIcon,
   TriangleAlertIcon,
   Volume2Icon,
 } from "lucide-react";
@@ -20,17 +22,19 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { aiErrorText } from "@/lib/ai-errors";
+import { wordsPerTurn, type ChatSessionStats } from "@/lib/chat/history";
 import type { Mission } from "@/lib/chat/mission";
 import type { ChatTurn } from "@/lib/chat/prompts";
 import type { ChatSummary, Correction } from "@/lib/chat/summary";
 import type { NewPhrase } from "@/lib/phrasebook";
+import { formatDecimal, formatSeconds } from "@/lib/progress";
 import { MissionCard } from "./MissionBar";
 
 export type SummaryState = { status: "loading" } | { status: "done"; data: ChatSummary } | { status: "error"; code: string };
 
 type Props = {
   topicLabel: string;
-  stats: { userTurns: number; good: number; needsWork: number };
+  stats: ChatSessionStats;
   corrections: Correction[];
   mission: Mission | null;
   goalsDone: number[];
@@ -64,6 +68,8 @@ export default function SessionSummary(p: Props) {
         <Stat label="Câu tự nhiên" value={p.stats.good} tone="success" />
         <Stat label="Câu nên sửa" value={p.stats.needsWork} tone={p.stats.needsWork ? "warn" : undefined} />
       </div>
+
+      <FluencyStats stats={p.stats} />
 
       {p.mission && <MissionCard mission={p.mission} done={p.goalsDone} />}
 
@@ -282,6 +288,38 @@ function PlayButton({ text, onPlay }: { text: string; onPlay: (text: string) => 
     >
       <Volume2Icon />
     </Button>
+  );
+}
+
+/** Reaction time and answer length: how spontaneously and how fully the learner spoke. */
+function FluencyStats({ stats }: { stats: ChatSessionStats }) {
+  const words = wordsPerTurn(stats);
+  if (words === null && stats.responseMs === undefined) return null;
+  return (
+    <Card size="sm">
+      <CardContent className="grid grid-cols-2 gap-4 text-sm">
+        <div className="flex flex-col gap-0.5">
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <TimerIcon className="size-3.5" /> Thời gian phản hồi
+          </p>
+          <p className="text-xl font-semibold tabular-nums">
+            {stats.responseMs === undefined ? "—" : formatSeconds(stats.responseMs)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {stats.responseMs === undefined
+              ? "Chưa đo được (chỉ tính câu trả lời bằng giọng nói ngay sau khi AI nói xong)"
+              : `Trung vị của ${stats.timedTurns} câu, từ lúc AI nói xong đến lúc bạn bắt đầu nói`}
+          </p>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <TextIcon className="size-3.5" /> Số từ mỗi lượt
+          </p>
+          <p className="text-xl font-semibold tabular-nums">{words === null ? "—" : formatDecimal(words)}</p>
+          <p className="text-xs text-muted-foreground">Trung bình mỗi lượt bạn nói; trả lời dài hơn là nói trôi hơn</p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

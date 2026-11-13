@@ -13,6 +13,7 @@ import {
   RotateCcwIcon,
   SparklesIcon,
   SquareIcon,
+  TimerIcon,
   TriangleAlertIcon,
   Volume2Icon,
 } from "lucide-react";
@@ -25,13 +26,21 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { aiErrorText, AiRequestError, postJSON, readAiError } from "@/lib/ai-errors";
 import { takeSentences, type ReplySuggestion } from "@/lib/chat/assist";
-import { completedGoals, type ChatSession, type ChatSessionInput, type SavedTurn } from "@/lib/chat/history";
+import {
+  completedGoals,
+  MAX_RESPONSE_MS,
+  sessionStats,
+  type ChatSession,
+  type ChatSessionInput,
+  type SavedTurn,
+} from "@/lib/chat/history";
 import type { Mission } from "@/lib/chat/mission";
 import { LEVELS, TOPICS, CUSTOM_TOPIC_ID, type ChatRole, type ChatTurn, type Feedback } from "@/lib/chat/prompts";
 import { CHAT_SCRIPT_ME, chatToScript, type ChatSummary, type Correction } from "@/lib/chat/summary";
 import { saveChat, saveChatOnExit } from "@/lib/chats-client";
 import { REVIEW_PASS_SCORE } from "@/lib/phrasebook";
 import { addPhrases } from "@/lib/phrases-client";
+import { formatSeconds } from "@/lib/progress";
 import { compareLine, type WordMark } from "@/lib/script";
 import { createScript } from "@/lib/scripts-client";
 import { queueScriptForPractice, type SavedScript } from "@/lib/settings";
@@ -61,6 +70,8 @@ type UiTurn = {
   showTranslation?: boolean;
   /** Last attempt at saying the corrected sentence again (practice only, not saved). */
   retry?: RetryResult;
+  /** Learner turns: how long they took to start answering (see SavedTurn.responseMs). */
+  responseMs?: number;
 };
 type RetryResult = { attempts: number } & (
   | { status: "done"; spoken: string; score: number; words: WordMark[] }
@@ -74,11 +85,12 @@ const toHistory = (turns: UiTurn[]): ChatTurn[] =>
 const toSaved = (turns: UiTurn[]): SavedTurn[] =>
   turns
     .filter((t) => !t.streaming && t.text)
-    .map((t) =>
-      t.feedback?.status === "done"
-        ? { role: t.role, text: t.text, feedback: t.feedback.data }
-        : { role: t.role, text: t.text },
-    );
+    .map((t) => ({
+      role: t.role,
+      text: t.text,
+      ...(t.feedback?.status === "done" ? { feedback: t.feedback.data } : {}),
+      ...(t.responseMs === undefined ? {} : { responseMs: t.responseMs }),
+    }));
 
 const fromSaved = (turns: SavedTurn[]): UiTurn[] =>
   turns.map((t, i) => ({
@@ -86,6 +98,7 @@ const fromSaved = (turns: SavedTurn[]): UiTurn[] =>
     role: t.role,
     text: t.text,
     ...(t.feedback ? { feedback: { status: "done" as const, data: t.feedback } } : {}),
+    ...(t.responseMs === undefined ? {} : { responseMs: t.responseMs }),
   }));
 
 type Props = {
@@ -124,6 +137,11 @@ export default function Conversation({ settings, voiceURI, recSupported, session
   const feedbackAborts = useRef(new Set<AbortController>());
   const suggestAbortRef = useRef<AbortController | null>(null);
   const aliveRef = useRef(true);
+  /**
+   * Response timing of the current turn: set when the mic opens right after the AI finished speaking,
+   * cleared by any interruption (pause, replay, suggestions, saying a correction again…).
+   */
+  const timingRef = useRef<{ start: number; speechAt?: number } | null>(null);
 
   const commit = (next: UiTurn[]) => {
     turnsRef.current = next;
@@ -151,17 +169,19 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     replyAbortRef.current = null;
     stopSpeaking();
     setRetryingId(null);
+    timingRef.current = null;
     if (turnsRef.current.some((t) => t.streaming)) commit(turnsRef.current.filter((t) => !t.streaming));
     return tokenRef.current;
   };
 
   // Latest versions of the flow functions, for callbacks created in earlier renders.
-  const actions = useRef<{ askAI: () => void; submitUser: (text: string) => void }>({
+  const actions = useRef<{ askAI: () => void; submitUser: (text: string, responseMs?: number) => void }>({
     askAI: () => {},
     submitUser: () => {},
   });
 
-  const listen = (token: number) => {
+  /** Listen for the learner's answer. `timed`: the mic opens right after the AI spoke, so measure the response time. */
+  const listen = (token: number, timed = false) => {
     setInterim("");
     if (!recSupported) {
       setPhase("waiting");
@@ -169,15 +189,22 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     }
     setPhase("listening");
     setNotice("");
+    timingRef.current = timed ? { start: performance.now() } : null;
     recRef.current = startListening({
       onInterim: (t) => {
         if (tokenRef.current === token) setInterim(t);
+      },
+      onSpeechStart: () => {
+        if (tokenRef.current === token && timingRef.current) timingRef.current.speechAt = performance.now();
       },
       onDone: (text, error) => {
         if (tokenRef.current !== token) return;
         recRef.current = null;
         setInterim("");
-        if (text) return actions.current.submitUser(text);
+        const timing = timingRef.current;
+        timingRef.current = null;
+        const responseMs = timing?.speechAt === undefined ? undefined : Math.round(timing.speechAt - timing.start);
+        if (text) return actions.current.submitUser(text, responseMs);
         setPhase("waiting");
         setNotice(
           error === "not-allowed" || error === "service-not-allowed"
@@ -250,7 +277,7 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     updateTurn(id, { text: text.trim(), streaming: false });
     setPhase("speaking");
     void speech.then(() => {
-      if (tokenRef.current === token) listen(token);
+      if (tokenRef.current === token) listen(token, true);
     });
   };
 
@@ -312,14 +339,16 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     }
   };
 
-  const submitUser = (raw: string) => {
+  /** Send the learner's sentence. `responseMs` only for a spoken answer that was timed (see listen). */
+  const submitUser = (raw: string, responseMs?: number) => {
     const text = raw.trim();
     if (!text) return;
     interrupt();
     setTyped("");
     const history = toHistory(turnsRef.current);
     const id = ++idRef.current;
-    commit([...turnsRef.current, { id, role: "user", text, feedback: { status: "loading" } }]);
+    const timing = responseMs === undefined || responseMs > MAX_RESPONSE_MS ? {} : { responseMs };
+    commit([...turnsRef.current, { id, role: "user", text, feedback: { status: "loading" }, ...timing }]);
     void requestFeedback(id, history, text);
     void actions.current.askAI();
   };
@@ -700,13 +729,11 @@ export default function Conversation({ settings, voiceURI, recSupported, session
 
   if (phase === "summary") {
     const list = turns.filter((t) => !t.streaming && t.text);
-    const userTurns = list.filter((t) => t.role === "user");
     const corrections = correctionsOf(list);
-    const good = userTurns.filter((t) => t.feedback?.status === "done" && t.feedback.data.verdict === "good").length;
     return (
       <SessionSummary
         topicLabel={topicLabel}
-        stats={{ userTurns: userTurns.length, good, needsWork: corrections.length }}
+        stats={sessionStats(toSaved(list), mission)}
         corrections={corrections}
         mission={mission}
         goalsDone={goalsDone}
@@ -825,6 +852,11 @@ export default function Conversation({ settings, voiceURI, recSupported, session
                 <div className="rounded-2xl rounded-tr-sm border border-primary/20 bg-accent px-4 py-3 text-accent-foreground">
                   <p className="leading-relaxed">{turn.text}</p>
                 </div>
+                {turn.responseMs !== undefined && (
+                  <p className="flex items-center gap-1 px-1 text-xs text-muted-foreground" title="Từ lúc AI nói xong đến lúc bạn bắt đầu nói">
+                    <TimerIcon className="size-3" /> Phản hồi sau {formatSeconds(turn.responseMs)}
+                  </p>
+                )}
                 <FeedbackView
                   feedback={turn.feedback}
                   onPlay={replay}

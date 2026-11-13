@@ -6,7 +6,17 @@ import { readGoalIndexes, readMission, type Mission } from "./mission";
 import { LEVELS, MAX_CUSTOM_TOPIC_LENGTH, MAX_TEXT_LENGTH, type ChatRole, type Feedback, type LevelId } from "./prompts";
 import { parseSummaryObject, type ChatSummary } from "./summary";
 
-export type SavedTurn = { role: ChatRole; text: string; feedback?: Feedback };
+export type SavedTurn = {
+  role: ChatRole;
+  text: string;
+  feedback?: Feedback;
+  /**
+   * Learner turns only: ms from the mic opening (right after the AI finished speaking) to the learner
+   * starting to speak. Missing when the answer was typed, or the turn was interrupted (pause, replay,
+   * suggestions…), so it only measures a spontaneous spoken reply.
+   */
+  responseMs?: number;
+};
 
 export type ChatSessionStats = {
   userTurns: number;
@@ -14,7 +24,26 @@ export type ChatSessionStats = {
   needsWork: number;
   goalCount: number;
   goalsDone: number;
+  /** Words in all learner turns (sessions saved before fluency stats lack it). */
+  words?: number;
+  /** Median response time of the timed learner turns, in ms. */
+  responseMs?: number;
+  /** Learner turns with a response time. */
+  timedTurns?: number;
 };
+
+/** Longest response time kept: beyond this the mic has given up anyway (startListening maxMs). */
+export const MAX_RESPONSE_MS = 30_000;
+
+/** Words in a sentence (tokens with a letter or digit, so punctuation alone does not count). */
+export const countWords = (text: string) => text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+
+export function median(xs: number[]): number | undefined {
+  if (!xs.length) return undefined;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+}
 
 export type ChatSession = {
   id: string;
@@ -58,14 +87,23 @@ export function completedGoals(turns: SavedTurn[], mission: Mission | undefined 
 
 export function sessionStats(turns: SavedTurn[], mission?: Mission | null): ChatSessionStats {
   const user = turns.filter((t) => t.role === "user");
+  const times = user.flatMap((t) => (t.responseMs === undefined ? [] : [t.responseMs]));
+  const responseMs = median(times);
   return {
     userTurns: user.length,
     good: user.filter((t) => t.feedback?.verdict === "good").length,
     needsWork: user.filter((t) => t.feedback && t.feedback.verdict !== "good").length,
     goalCount: mission?.goals.length ?? 0,
     goalsDone: completedGoals(turns, mission).length,
+    words: user.reduce((n, t) => n + countWords(t.text), 0),
+    timedTurns: times.length,
+    ...(responseMs === undefined ? {} : { responseMs }),
   };
 }
+
+/** Words per learner turn, or null when unknown (old session) or nothing was said. */
+export const wordsPerTurn = (s: Pick<ChatSessionStats, "words" | "userTurns">): number | null =>
+  s.words !== undefined && s.userTurns > 0 ? s.words / s.userTurns : null;
 
 function readFeedback(v: unknown): Feedback | undefined {
   if (!v || typeof v !== "object") return undefined;
@@ -81,6 +119,22 @@ function readFeedback(v: unknown): Feedback | undefined {
   return fb;
 }
 
+/** One turn sent by the client: null when malformed (reject the session), undefined when empty (skip it). */
+function readTurn(t: unknown): SavedTurn | null | undefined {
+  if (!t || typeof t !== "object") return null;
+  const d = t as Record<string, unknown>;
+  if ((d.role !== "user" && d.role !== "assistant") || typeof d.text !== "string") return null;
+  const text = d.text.trim().slice(0, MAX_TEXT_LENGTH);
+  if (!text) return undefined;
+  const turn: SavedTurn = { role: d.role, text };
+  if (d.role !== "user") return turn;
+  const feedback = readFeedback(d.feedback);
+  if (feedback) turn.feedback = feedback;
+  const ms = d.responseMs;
+  if (typeof ms === "number" && Number.isFinite(ms) && ms >= 0 && ms <= MAX_RESPONSE_MS) turn.responseMs = Math.round(ms);
+  return turn;
+}
+
 /** Validate a session sent by the client. Returns null when it is not usable. */
 export function readChatSessionInput(input: unknown): ChatSessionInput | null {
   if (!input || typeof input !== "object") return null;
@@ -91,11 +145,9 @@ export function readChatSessionInput(input: unknown): ChatSessionInput | null {
 
   const turns: SavedTurn[] = [];
   for (const t of d.turns.slice(0, MAX_SAVED_TURNS)) {
-    if (!t || (t.role !== "user" && t.role !== "assistant") || typeof t.text !== "string") return null;
-    const text = t.text.trim().slice(0, MAX_TEXT_LENGTH);
-    if (!text) continue;
-    const feedback = t.role === "user" ? readFeedback(t.feedback) : undefined;
-    turns.push(feedback ? { role: t.role, text, feedback } : { role: t.role, text });
+    const turn = readTurn(t);
+    if (turn === null) return null;
+    if (turn) turns.push(turn);
   }
   if (!turns.some((t) => t.role === "user")) return null;
 

@@ -1,13 +1,29 @@
 "use client";
 
-import { FlameIcon, MessagesSquareIcon, MicIcon, TargetIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
+import {
+  FlameIcon,
+  MessagesSquareIcon,
+  MicIcon,
+  TargetIcon,
+  TextIcon,
+  TimerIcon,
+  TrendingDownIcon,
+  TrendingUpIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fetchChats } from "@/lib/chats-client";
 import { fetchPhrases } from "@/lib/phrases-client";
-import { progressOverview, relativeDayLabel, type ProgressOverview as Overview } from "@/lib/progress";
+import {
+  formatDecimal,
+  formatSeconds,
+  progressOverview,
+  relativeDayLabel,
+  type ProgressOverview as Overview,
+  type Trend,
+} from "@/lib/progress";
 import { cn } from "@/lib/utils";
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
@@ -97,6 +113,35 @@ export default function ProgressOverview() {
             <ActivityStrip days={o.days} />
           </CardContent>
         </Card>
+
+        {(o.fluency.responseMs || o.fluency.words) && (
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle className="text-sm">Phản xạ và độ trôi chảy</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-4">
+              <FluencyMetric
+                icon={TimerIcon}
+                label="Thời gian phản hồi"
+                trend={o.fluency.responseMs}
+                format={(ms) => formatSeconds(ms)}
+                formatDiff={(d) => `${formatDecimal(Math.abs(d) / 1000)} giây`}
+                lowerIsBetter
+                better="nhanh hơn"
+                worse="chậm hơn"
+              />
+              <FluencyMetric
+                icon={TextIcon}
+                label="Số từ mỗi lượt"
+                trend={o.fluency.words}
+                format={(w) => formatDecimal(w)}
+                formatDiff={(d) => `${formatDecimal(Math.abs(d))} từ`}
+                better="dài hơn"
+                worse="ngắn hơn"
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {o.rates.length > 0 && (
           <Card size="sm">
@@ -226,6 +271,50 @@ function RateBars({ rates, now }: { rates: Overview["rates"]; now: number }) {
         <span>Cũ hơn</span>
         <span>Gần nhất</span>
       </div>
+    </div>
+  );
+}
+
+/** One fluency number (average of the latest sessions) and how it moved against the sessions before. */
+function FluencyMetric({
+  icon: Icon,
+  label,
+  trend,
+  format,
+  formatDiff,
+  lowerIsBetter,
+  better,
+  worse,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  trend: Trend | null;
+  format: (v: number) => string;
+  formatDiff: (diff: number) => string;
+  lowerIsBetter?: boolean;
+  better: string;
+  worse: string;
+}) {
+  const hint = (): React.ReactNode => {
+    if (!trend) return "Chưa có dữ liệu";
+    if (trend.earlier === null) return `Trung bình ${trend.sessions} buổi gần nhất`;
+    const diff = trend.recent - trend.earlier;
+    // Below one displayed step (0.1) the change is noise.
+    if (formatDiff(diff).startsWith("0,0")) return "Giữ nguyên so với các buổi trước";
+    const improved = lowerIsBetter ? diff < 0 : diff > 0;
+    return (
+      <span className={improved ? "text-success" : "text-amber-600 dark:text-amber-400"}>
+        {improved ? better : worse} {formatDiff(diff)} so với các buổi trước
+      </span>
+    );
+  };
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="size-3.5" /> {label}
+      </p>
+      <p className="text-xl font-semibold tabular-nums">{trend ? format(trend.recent) : "—"}</p>
+      <p className="text-xs text-muted-foreground">{hint()}</p>
     </div>
   );
 }

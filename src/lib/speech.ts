@@ -85,6 +85,8 @@ interface Recognition {
   onresult: ((e: RecEvent) => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onend: (() => void) | null;
+  /** Fired when the recognizer detects speech (before any words are recognized). */
+  onspeechstart: (() => void) | null;
   start(): void;
   stop(): void;
   abort(): void;
@@ -113,6 +115,8 @@ export type ListenController = { stop: () => void; abort: () => void };
 export function startListening(h: {
   onInterim: (text: string) => void;
   onDone: (text: string, error?: string) => void;
+  /** Once, when the learner starts speaking (speech detected, or the first words if that comes first). */
+  onSpeechStart?: () => void;
   silenceMs?: number;
   maxMs?: number;
 }): ListenController {
@@ -133,8 +137,16 @@ export function startListening(h: {
   let ended = false;
   let silenceTimer: ReturnType<typeof setTimeout> | undefined;
   const maxTimer = setTimeout(() => rec.stop(), h.maxMs ?? 25000);
+  let speechStarted = false;
+  const speechStart = () => {
+    if (speechStarted) return;
+    speechStarted = true;
+    h.onSpeechStart?.();
+  };
 
+  rec.onspeechstart = speechStart;
   rec.onresult = (e) => {
+    speechStart();
     let f = "";
     let it = "";
     for (let i = 0; i < e.results.length; i++) {

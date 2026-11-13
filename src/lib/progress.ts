@@ -2,7 +2,7 @@
  * Pure logic for the progress overview: practice days and streaks (in the learner's local time),
  * session counts and how the share of natural sentences moves over time. No DOM, no network.
  */
-import type { ChatSessionMeta } from "./chat/history";
+import { wordsPerTurn, type ChatSessionMeta } from "./chat/history";
 
 type SessionLike = Pick<ChatSessionMeta, "id" | "topicLabel" | "stats" | "activity" | "createdAt" | "focus">;
 
@@ -93,9 +93,22 @@ export type ProgressOverview = {
   trend: { recent: number; earlier: number } | null;
   /** Problems pointed out in the latest summaries, newest first. */
   focus: { issue: string; topicLabel: string; at: number }[];
+  /** Reaction time (ms, lower is better) and words per turn (higher is better), latest sessions vs the ones before. */
+  fluency: { responseMs: Trend | null; words: Trend | null };
 };
 
+/** Average of the latest `window` values and of the `window` before them (null when there are none). */
+export type Trend = { recent: number; earlier: number | null; sessions: number };
+
 const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+/** Trend of a per-session value over the sessions that have it, oldest first. */
+function trendOf(values: number[], window: number): Trend | null {
+  if (!values.length) return null;
+  const recent = values.slice(-window);
+  const earlier = values.slice(-2 * window, -window);
+  return { recent: avg(recent), earlier: earlier.length ? avg(earlier) : null, sessions: recent.length };
+}
 
 export function progressOverview(
   sessionsInput: SessionLike[],
@@ -127,8 +140,27 @@ export function progressOverview(
       .reverse()
       .flatMap((s) => s.focus.map((issue) => ({ issue, topicLabel: s.topicLabel, at: s.createdAt })))
       .slice(0, focusCount),
+    fluency: {
+      responseMs: trendOf(
+        sessions.flatMap((s) => (s.stats.responseMs === undefined ? [] : [s.stats.responseMs])),
+        trendWindow,
+      ),
+      words: trendOf(
+        sessions.flatMap((s) => {
+          const w = wordsPerTurn(s.stats);
+          return w === null ? [] : [w];
+        }),
+        trendWindow,
+      ),
+    },
   };
 }
+
+/** One decimal with a Vietnamese comma: 1.84 → "1,8". */
+export const formatDecimal = (n: number) => n.toFixed(1).replace(".", ",");
+
+/** 1840 → "1,8 giây". */
+export const formatSeconds = (ms: number) => `${formatDecimal(ms / 1000)} giây`;
 
 /** "Hôm nay", "Hôm qua", "3 ngày trước" or a date. */
 export function relativeDayLabel(ts: number, now: number): string {
