@@ -2,7 +2,6 @@
 
 import {
   ArrowDownUpIcon,
-  ChevronLeftIcon,
   ChevronRightIcon,
   CloudUploadIcon,
   DownloadIcon,
@@ -33,7 +32,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TablePager, usePagination } from "@/components/common/TablePager";
 import { aiErrorText } from "@/lib/ai-errors";
+import { fold } from "@/lib/search";
 import { relativeDayLabel } from "@/lib/progress";
 import { parseScript } from "@/lib/script";
 import { SAVED_SORTS, sortSavedScripts, type SavedScript, type SavedSort } from "@/lib/settings";
@@ -71,23 +72,6 @@ const SEARCH_FROM = 5;
 const SORT_FROM = 2;
 /** Rows per page of the table. */
 const PAGE_SIZE = 10;
-
-/** Page buttons to show (0-based), with "…" for gaps: first, last, and the pages around the current one. */
-function pageItems(current: number, count: number): (number | "…")[] {
-  const pages = [...new Set([0, current - 1, current, current + 1, count - 1])]
-    .filter((n) => n >= 0 && n < count)
-    .sort((a, b) => a - b);
-  return pages.flatMap((n, i) => (i > 0 && n - pages[i - 1] > 1 ? ["…" as const, n] : [n]));
-}
-
-/** Lowercase and strip Vietnamese diacritics so "khach san" finds "Khách sạn". */
-const fold = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toLowerCase();
 
 /** The saved scripts as a table: click a row to set up and practise it. */
 export default function ScriptLibrary(p: Props) {
@@ -192,8 +176,6 @@ export default function ScriptLibrary(p: Props) {
 
 function ScriptTable(p: Props & { onImportClick: () => void }) {
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(
     () =>
       sortSavedScripts(p.saved, p.sort).map((s) => {
@@ -206,14 +188,7 @@ function ScriptTable(p: Props & { onImportClick: () => void }) {
   const visible = q ? rows.filter((r) => r.haystack.includes(q)) : rows;
   const sortValue = SAVED_SORTS.some((o) => o.value === p.sort) ? p.sort : "updated";
   const now = Date.now();
-  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-  const current = Math.min(page, pageCount - 1); // the list can shrink (delete, search)
-  const first = current * PAGE_SIZE;
-  const pageRows = visible.slice(first, first + PAGE_SIZE);
-  const goToPage = (n: number) => {
-    setPage(n);
-    scrollRef.current?.scrollTo({ top: 0 });
-  };
+  const { current, pageCount, first, rows: pageRows, scrollRef, goToPage } = usePagination(visible, PAGE_SIZE);
 
   return (
     <>
@@ -346,53 +321,10 @@ function ScriptTable(p: Props & { onImportClick: () => void }) {
         </div>
       )}
       {visible.length > 0 && (pageCount > 1 || q) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
-          <span className="tabular-nums">
-            {pageCount > 1 && `${first + 1}–${first + pageRows.length} / `}
-            {visible.length} kịch bản{q && ` khớp (trong ${p.saved.length})`}
-          </span>
-          {pageCount > 1 && (
-            <nav className="flex items-center gap-0.5" aria-label="Phân trang">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => goToPage(current - 1)}
-                disabled={current === 0}
-                aria-label="Trang trước"
-              >
-                <ChevronLeftIcon />
-              </Button>
-              {pageItems(current, pageCount).map((n, i) =>
-                n === "…" ? (
-                  <span key={`gap-${i}`} className="px-1">
-                    …
-                  </span>
-                ) : (
-                  <Button
-                    key={n}
-                    variant={n === current ? "secondary" : "ghost"}
-                    size="icon-sm"
-                    className="tabular-nums"
-                    onClick={() => goToPage(n)}
-                    aria-label={`Trang ${n + 1}`}
-                    aria-current={n === current ? "page" : undefined}
-                  >
-                    {n + 1}
-                  </Button>
-                ),
-              )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => goToPage(current + 1)}
-                disabled={current === pageCount - 1}
-                aria-label="Trang sau"
-              >
-                <ChevronRightIcon />
-              </Button>
-            </nav>
-          )}
-        </div>
+        <TablePager current={current} pageCount={pageCount} onPageChange={goToPage}>
+          {pageCount > 1 && `${first + 1}–${first + pageRows.length} / `}
+          {visible.length} kịch bản{q && ` khớp (trong ${p.saved.length})`}
+        </TablePager>
       )}
     </>
   );
