@@ -2,6 +2,8 @@
 
 import {
   CheckCircle2Icon,
+  EyeIcon,
+  HeadphonesIcon,
   LanguagesIcon,
   LightbulbIcon,
   Loader2Icon,
@@ -72,6 +74,8 @@ type UiTurn = {
   retry?: RetryResult;
   /** Learner turns: how long they took to start answering (see SavedTurn.responseMs). */
   responseMs?: number;
+  /** "Chỉ nghe": the learner chose to show this AI line's text. */
+  revealed?: boolean;
 };
 type RetryResult = { attempts: number } & (
   | { status: "done"; spoken: string; score: number; words: WordMark[] }
@@ -110,9 +114,19 @@ type Props = {
   /** A saved conversation to reopen: it starts on its summary, "Trò chuyện tiếp" picks it up again. */
   initial?: ChatSession;
   onExit: () => void;
+  /** Turn "Chỉ nghe" (settings.listenOnly) on or off during the conversation. */
+  onToggleListenOnly?: () => void;
 };
 
-export default function Conversation({ settings, voiceURI, recSupported, sessionId, initial, onExit }: Props) {
+export default function Conversation({
+  settings,
+  voiceURI,
+  recSupported,
+  sessionId,
+  initial,
+  onExit,
+  onToggleListenOnly,
+}: Props) {
   const [turns, setTurns] = useState<UiTurn[]>(() => (initial ? fromSaved(initial.turns) : []));
   const [phase, setPhase] = useState<Phase>(initial ? "summary" : "thinking");
   const [mission, setMission] = useState<Mission | null>(initial?.mission ?? null);
@@ -431,6 +445,12 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     });
   };
 
+  /** "Chỉ nghe": an AI line's text is hidden until the learner reveals it. */
+  const isHidden = (t: UiTurn) => settings.listenOnly && t.role === "assistant" && !t.revealed;
+  /** The latest AI line, when its text is hidden (shortcut T reveals it). */
+  const latestAi = [...turns].reverse().find((t) => t.role === "assistant" && !t.streaming && t.text);
+  const hiddenLatest = latestAi && isHidden(latestAi) ? latestAi : undefined;
+
   /** The latest correction in the conversation (shortcut R). */
   const latestCorrectionId = [...turns]
     .reverse()
@@ -707,6 +727,9 @@ export default function Conversation({ settings, voiceURI, recSupported, session
     if (e.code === "Space" && (phase === "listening" || phase === "waiting")) {
       e.preventDefault();
       toggleMic();
+    } else if (e.code === "KeyT" && hiddenLatest && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      updateTurn(hiddenLatest.id, { revealed: true });
     } else if (e.code === "KeyH" && myTurn && !showSuggest && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       void fetchSuggestions();
@@ -784,9 +807,24 @@ export default function Conversation({ settings, voiceURI, recSupported, session
               )}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={endSession}>
-            <LogOutIcon /> Kết thúc
-          </Button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onToggleListenOnly && (
+              <Hint label={settings.listenOnly ? "Tắt Chỉ nghe (hiện chữ của AI)" : "Chỉ nghe (ẩn chữ của AI)"}>
+                <Button
+                  variant={settings.listenOnly ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  onClick={onToggleListenOnly}
+                  aria-label="Chỉ nghe"
+                  aria-pressed={settings.listenOnly}
+                >
+                  <HeadphonesIcon className={cn(settings.listenOnly && "text-primary")} />
+                </Button>
+              </Hint>
+            )}
+            <Button variant="outline" size="sm" onClick={endSession}>
+              <LogOutIcon /> Kết thúc
+            </Button>
+          </div>
         </div>
 
         <div className="flex flex-1 flex-col gap-4 pb-6">
@@ -802,7 +840,19 @@ export default function Conversation({ settings, voiceURI, recSupported, session
                     turn.id === lastTurn?.id && phase === "speaking" && "ring-2 ring-primary/40",
                   )}
                 >
-                  {turn.text ? (
+                  {turn.text && isHidden(turn) ? (
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <HeadphonesIcon
+                        className={cn(
+                          "size-4 shrink-0",
+                          turn.id === lastTurn?.id && phase === "speaking" && "animate-pulse text-primary",
+                        )}
+                      />
+                      {turn.streaming || (turn.id === lastTurn?.id && phase === "speaking")
+                        ? "Hãy nghe…"
+                        : "Chữ đang ẩn: hãy nghe"}
+                    </p>
+                  ) : turn.text ? (
                     <p className="leading-relaxed">{turn.text}</p>
                   ) : (
                     <p className="flex items-center gap-2 text-muted-foreground">
@@ -838,6 +888,17 @@ export default function Conversation({ settings, voiceURI, recSupported, session
                         />
                         Nghe lại
                       </Button>
+                      {isHidden(turn) && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="text-muted-foreground"
+                          onClick={() => updateTurn(turn.id, { revealed: true })}
+                          title={turn.id === hiddenLatest?.id ? "Hiện chữ (T)" : "Hiện chữ"}
+                        >
+                          <EyeIcon /> Hiện chữ
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="xs"
@@ -1014,7 +1075,8 @@ export default function Conversation({ settings, voiceURI, recSupported, session
             )}
           </div>
           <p className="text-center text-xs text-muted-foreground">
-            Space: nói / dừng · H: gợi ý · R: nói lại câu vừa sửa · Esc: tạm dừng
+            Space: nói / dừng · H: gợi ý · R: nói lại câu vừa sửa{settings.listenOnly && " · T: hiện chữ"} · Esc:
+            tạm dừng
           </p>
         </div>
       </div>

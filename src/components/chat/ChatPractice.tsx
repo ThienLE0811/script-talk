@@ -32,6 +32,8 @@ export type ChatSettings = {
   mission: boolean;
   /** "Tình huống khó": the AI now and then misunderstands, answers vaguely or raises a problem. */
   challenge: boolean;
+  /** "Chỉ nghe": hide the AI's text so the learner listens instead of reading (a display preference). */
+  listenOnly: boolean;
 };
 
 const K_CHAT_SETTINGS = "scripttalk.chat.settings";
@@ -43,6 +45,7 @@ const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   voiceURI: null,
   mission: true,
   challenge: false,
+  listenOnly: false,
 };
 
 /** The "natural conversation" mode: pick a topic, then talk freely with the AI. */
@@ -121,6 +124,7 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
         voiceURI={voiceURI}
         recSupported={!!recSupported}
         onExit={() => switchMode("setup")}
+        onToggleListenOnly={() => set({ listenOnly: !settings.listenOnly })}
       />
     );
   }
@@ -262,6 +266,23 @@ export default function ChatPractice({ configured }: { configured: boolean }) {
                 <span className="text-xs text-muted-foreground">
                   Thỉnh thoảng AI sẽ hiểu nhầm ý bạn, trả lời mơ hồ, hỏi bất ngờ hoặc gặp sự cố (hết hàng, hết phòng…)
                   như ngoài đời. Luyện cách sửa hiểu lầm và hỏi lại: “Sorry, I meant…”, “What do you mean by…?”
+                </span>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="chat-listen-only"
+                checked={settings.listenOnly}
+                onCheckedChange={(v) => set({ listenOnly: v === true })}
+                className="mt-0.5"
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="chat-listen-only" className="font-normal">
+                  Chỉ nghe
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  Ẩn chữ câu nói của AI để luyện nghe như ngoài đời. Không nghe kịp thì bấm “Hiện chữ” (phím T) hoặc
+                  “Nghe lại”. Bật/tắt được ngay trong lúc trò chuyện.
                 </span>
               </div>
             </div>
